@@ -245,6 +245,42 @@ read -p "AI model (llama2/llama3/mistral) [llama2]: " MODEL
 MODEL=${MODEL:-llama2}
 
 # =============================================================================
+# AI Provider Configuration
+# =============================================================================
+echo ""
+echo -e "${BLUE}🤖 AI Provider Configuration${NC}"
+echo ""
+echo "Choose your AI provider:"
+echo "  1. Ollama (local, free, requires GPU for best performance)"
+echo "  2. Gemini (Google AI, requires API key)"
+echo ""
+read -p "AI Provider (1=Ollama, 2=Gemini) [1]: " AI_CHOICE
+AI_CHOICE=${AI_CHOICE:-1}
+
+GEMINI_API_KEY=""
+AI_PROVIDER="ollama"
+
+if [ "$AI_CHOICE" = "2" ]; then
+    AI_PROVIDER="gemini"
+    echo ""
+    echo -e "${CYAN}Get your Gemini API key from:${NC}"
+    echo "  https://aistudio.google.com/app/apikey"
+    echo ""
+    read -p "Gemini API Key: " GEMINI_API_KEY
+    
+    if [ -z "$GEMINI_API_KEY" ]; then
+        echo -e "${YELLOW}⚠️  No API key provided. Falling back to Ollama.${NC}"
+        AI_PROVIDER="ollama"
+    else
+        echo -e "${GREEN}✓${NC} Gemini API configured"
+        # Set default Gemini model
+        MODEL="gemini-2.5-flash"
+        read -p "Gemini model [gemini-2.5-flash]: " GEMINI_MODEL
+        MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+    fi
+fi
+
+# =============================================================================
 # Security Configuration
 # =============================================================================
 echo ""
@@ -302,10 +338,17 @@ echo -e "${GREEN}✓${NC} Created company_info/"
 cat > .env << EOF
 # AI Configuration
 AI_MODEL=$MODEL
-AI_PROVIDER=ollama
+AI_PROVIDER=$AI_PROVIDER
 EOF
 
-# Add Ollama URL based on native or docker
+# Add Gemini API key if using Gemini
+if [ "$AI_PROVIDER" = "gemini" ]; then
+    cat >> .env << EOF
+GEMINI_API_KEY=$GEMINI_API_KEY
+EOF
+fi
+
+# Add Ollama URL based on native or docker (still useful as fallback)
 if [ "$USE_NATIVE_OLLAMA" = true ]; then
     cat >> .env << EOF
 AI_SERVER_URL=http://host.docker.internal:11434
@@ -421,7 +464,12 @@ pull_model() {
     return 1
 }
 
-pull_model $MODEL
+# Only pull model if using Ollama
+if [ "$AI_PROVIDER" = "ollama" ]; then
+    pull_model $MODEL
+else
+    echo -e "${GREEN}✓${NC} Using Gemini API - no model download needed"
+fi
 
 # =============================================================================
 # Cloudflare Tunnel Status

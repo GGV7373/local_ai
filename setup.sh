@@ -98,6 +98,72 @@ fi
 echo -e "${GREEN}✓${NC} Docker Compose available"
 
 # =============================================================================
+# Check for Native Ollama
+# =============================================================================
+USE_NATIVE_OLLAMA=false
+OLLAMA_URL=""
+
+check_native_ollama() {
+    echo -e "${BLUE}🔍 Checking for Ollama...${NC}"
+    
+    # Check if Ollama is running on port 11434
+    if curl -s --connect-timeout 2 http://localhost:11434/api/tags &>/dev/null; then
+        echo -e "${GREEN}✓${NC} Native Ollama detected on localhost:11434"
+        USE_NATIVE_OLLAMA=true
+        OLLAMA_URL="http://host.docker.internal:11434"
+        
+        # List available models
+        MODELS=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | head -5)
+        if [ -n "$MODELS" ]; then
+            echo -e "${CYAN}   Available models:${NC}"
+            echo "$MODELS" | while read model; do echo "     - $model"; done
+        fi
+        echo ""
+        return 0
+    fi
+    
+    # Check if Ollama command exists but not running
+    if command -v ollama &>/dev/null; then
+        echo -e "${YELLOW}⚠️  Ollama installed but not running.${NC}"
+        echo ""
+        echo "   Options:"
+        echo "   1. Start native Ollama: ollama serve"
+        echo "   2. Use Docker Ollama (will run in container)"
+        echo ""
+        read -p "Use Docker Ollama? (y/n) [y]: " USE_DOCKER_OLLAMA
+        if [[ "$USE_DOCKER_OLLAMA" =~ ^[Nn]$ ]]; then
+            echo -e "${YELLOW}Please start Ollama with 'ollama serve' and run setup again.${NC}"
+            exit 0
+        fi
+        return 1
+    fi
+    
+    # Check if port 11434 is in use by something else
+    if ss -tuln 2>/dev/null | grep -q ":11434 " || netstat -tuln 2>/dev/null | grep -q ":11434 "; then
+        echo -e "${RED}⚠️  Port 11434 is in use by another process.${NC}"
+        echo ""
+        echo "   To find what's using it:"
+        echo "   sudo lsof -i :11434"
+        echo "   sudo ss -tlnp | grep 11434"
+        echo ""
+        read -p "Try to kill the process? (y/n) [n]: " KILL_PROC
+        if [[ "$KILL_PROC" =~ ^[Yy]$ ]]; then
+            sudo fuser -k 11434/tcp 2>/dev/null || true
+            sleep 2
+        else
+            echo -e "${YELLOW}Please free up port 11434 and run setup again.${NC}"
+            exit 1
+        fi
+    fi
+    
+    echo -e "${CYAN}ℹ${NC}  Ollama not found - will use Docker container"
+    return 1
+}
+
+check_native_ollama
+echo ""
+
+# =============================================================================
 # Fix DNS Resolution (Common WSL Issue)
 # =============================================================================
 fix_dns() {
@@ -237,6 +303,22 @@ cat > .env << EOF
 # AI Configuration
 AI_MODEL=$MODEL
 AI_PROVIDER=ollama
+EOF
+
+# Add Ollama URL based on native or docker
+if [ "$USE_NATIVE_OLLAMA" = true ]; then
+    cat >> .env << EOF
+AI_SERVER_URL=http://host.docker.internal:11434
+USE_NATIVE_OLLAMA=true
+EOF
+else
+    cat >> .env << EOF
+AI_SERVER_URL=http://ollama:11434
+USE_NATIVE_OLLAMA=false
+EOF
+fi
+
+cat >> .env << EOF
 
 # Security Configuration
 SECRET_KEY=$SECRET_KEY
@@ -265,15 +347,25 @@ echo -e "${GREEN}✓${NC} Created .env"
 echo ""
 echo -e "${BLUE}🚀 Starting services...${NC}"
 
+# Build compose command with appropriate profiles
+COMPOSE_PROFILES=""
+
+# Add tunnel profile if configured
 if [ -n "$TUNNEL_TOKEN" ]; then
-    $COMPOSE --profile tunnel up -d
-else
-    $COMPOSE up -d
+    COMPOSE_PROFILES="$COMPOSE_PROFILES --profile tunnel"
 fi
 
+# Add docker-ollama profile if NOT using native
+if [ "$USE_NATIVE_OLLAMA" != true ]; then
+    COMPOSE_PROFILES="$COMPOSE_PROFILES --profile docker-ollama"
+    echo -e "${CYAN}   Using Docker Ollama container${NC}"
+else
+    echo -e "${CYAN}   Using native Ollama on host${NC}"
+fi
+
+$COMPOSE $COMPOSE_PROFILES up -d
+
 echo ""
-echo -e "${YELLOW}⏳ Waiting for Ollama to start...${NC}"
-sleep 10
 
 # =============================================================================
 # Pull AI Model with Retry
@@ -286,6 +378,22 @@ pull_model() {
     echo -e "${BLUE}📥 Downloading AI model '$model'...${NC}"
     echo -e "${CYAN}   This may take a while depending on model size and connection speed.${NC}"
     echo ""
+    
+    # Use native ollama command if available, otherwise docker
+    if [ "$USE_NATIVE_OLLAMA" = true ]; then
+        if ollama pull $model; then
+            echo -e "${GREEN}✓${NC} Model '$model' downloaded successfully!"
+            return 0
+        else
+            echo -e "${RED}❌ Failed to download model.${NC}"
+            echo "   Try manually: ollama pull $model"
+            return 1
+        fi
+    fi
+    
+    # Docker-based pull with retry
+    echo -e "${YELLOW}⏳ Waiting for Ollama container to start...${NC}"
+    sleep 10
     
     while [ $retry -lt $max_retries ]; do
         if docker exec nora_ollama ollama pull $model; then

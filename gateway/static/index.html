@@ -76,7 +76,16 @@
             <!-- Chat View -->
             <div id="chatView" class="content-body">
                 <div class="chat-container">
-                    <div class="chat-header" style="padding: 10px 15px; display: flex; justify-content: flex-end; border-bottom: 1px solid var(--border);">
+                    <div class="chat-header" style="padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
+                        <div class="provider-selector">
+                            <select id="providerSelect" onchange="onProviderChange()">
+                                <option value="ollama">🖥️ Ollama (Local)</option>
+                                <option value="gemini">✨ Gemini</option>
+                            </select>
+                            <select id="modelSelect" onchange="onModelChange()">
+                                <option value="">Default Model</option>
+                            </select>
+                        </div>
                         <button class="clear-chat-btn" onclick="clearChat()">🗑️ Clear Chat</button>
                     </div>
                     <div class="messages" id="messages"></div>

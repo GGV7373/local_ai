@@ -279,7 +279,7 @@ def get_config() -> dict:
 # =============================================================================
 # AI Providers
 # =============================================================================
-async def ask_ollama(message: str, context: str) -> str:
+async def ask_ollama(message: str, context: str, model: str = None) -> str:
     """Query Ollama."""
     config = get_config()
     
@@ -297,11 +297,12 @@ Use this information to answer questions:
 
 Be helpful, friendly, and concise. If asked about files or documents, refer to the information provided above."""
 
+    use_model = model or AI_MODEL
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             f"{AI_SERVER_URL}/api/chat",
             json={
-                "model": AI_MODEL,
+                "model": use_model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": message}
@@ -312,9 +313,11 @@ Be helpful, friendly, and concise. If asked about files or documents, refer to t
         response.raise_for_status()
         return response.json()["message"]["content"]
 
-async def ask_gemini(message: str, context: str) -> str:
+async def ask_gemini(message: str, context: str, model: str = None) -> str:
     """Query Google Gemini."""
     config = get_config()
+    use_model = model or AI_MODEL or "gemini-1.5-flash"
+    
     prompt = f"""You are {config.get('assistant_name', 'Nora')}, an AI assistant for {config.get('company_name', 'the company')}.
 
 Use this information to answer questions:
@@ -326,21 +329,24 @@ Be helpful, friendly, and concise."""
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1/models/{use_model}:generateContent?key={GEMINI_API_KEY}",
             json={"contents": [{"parts": [{"text": prompt}]}]}
         )
         response.raise_for_status()
         data = response.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
-async def ask_ai(message: str) -> str:
-    """Query the AI with company context."""
+async def ask_ai(message: str, provider: str = None, model: str = None) -> str:
+    """Query the AI with company context. Supports dynamic provider switching."""
     context = load_company_context()
     
-    if AI_PROVIDER == "gemini" and GEMINI_API_KEY:
-        return await ask_gemini(message, context)
+    # Use specified provider or fall back to default
+    use_provider = provider or AI_PROVIDER
+    
+    if use_provider == "gemini" and GEMINI_API_KEY:
+        return await ask_gemini(message, context, model)
     else:
-        return await ask_ollama(message, context)
+        return await ask_ollama(message, context, model)
 
 # =============================================================================
 # Models
@@ -351,6 +357,8 @@ class LoginRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    provider: Optional[str] = None  # Optional: "ollama" or "gemini"
+    model: Optional[str] = None  # Optional: override model
 
 class FileInfo(BaseModel):
     name: str
@@ -393,6 +401,47 @@ async def health():
 async def config():
     return get_config()
 
+@app.get("/providers")
+async def get_providers():
+    """Get available AI providers and their status."""
+    providers = []
+    
+    # Check Ollama
+    ollama_status = "unavailable"
+    ollama_models = []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(f"{AI_SERVER_URL}/api/tags")
+            if res.status_code == 200:
+                ollama_status = "available"
+                ollama_models = [m["name"] for m in res.json().get("models", [])]
+    except:
+        pass
+    
+    providers.append({
+        "id": "ollama",
+        "name": "Ollama (Local)",
+        "status": ollama_status,
+        "models": ollama_models,
+        "default_model": AI_MODEL if AI_PROVIDER == "ollama" else "llama2"
+    })
+    
+    # Check Gemini
+    gemini_status = "available" if GEMINI_API_KEY else "not_configured"
+    providers.append({
+        "id": "gemini",
+        "name": "Google Gemini",
+        "status": gemini_status,
+        "models": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"] if GEMINI_API_KEY else [],
+        "default_model": AI_MODEL if AI_PROVIDER == "gemini" else "gemini-1.5-flash"
+    })
+    
+    return {
+        "providers": providers,
+        "default_provider": AI_PROVIDER,
+        "default_model": AI_MODEL
+    }
+
 @app.post("/auth/login")
 async def login(request: LoginRequest, req: Request):
     """Authenticate user and return JWT token."""
@@ -431,11 +480,16 @@ async def verify_auth(user: str = Depends(get_current_user)):
 # =============================================================================
 @app.post("/chat")
 async def chat(request: ChatRequest, user: str = Depends(get_current_user)):
-    """Chat with the AI (requires authentication)."""
+    """Chat with the AI (requires authentication). Supports provider switching."""
     try:
-        response = await ask_ai(request.message)
-        return {"response": response}
+        response = await ask_ai(request.message, request.provider, request.model)
+        return {
+            "response": response,
+            "provider": request.provider or AI_PROVIDER,
+            "model": request.model or AI_MODEL
+        }
     except Exception as e:
+        logger.error(f"Chat error: {e}")
         return {"response": f"Sorry, I encountered an error: {str(e)}"}
 
 @app.websocket("/ws")

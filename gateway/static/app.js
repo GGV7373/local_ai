@@ -6,6 +6,9 @@ let currentUser = localStorage.getItem('nora_user');
 let config = { assistant_name: 'Nora', company_name: 'My Company' };
 let currentFileDir = 'uploads';
 let chatHistory = [];
+let providers = [];
+let currentProvider = localStorage.getItem('nora_provider') || 'ollama';
+let currentModel = localStorage.getItem('nora_model') || '';
 
 // =============================================================================
 // Toast Notifications
@@ -80,6 +83,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('mobileTitle').textContent = config.assistant_name + ' AI';
     document.getElementById('companyName').textContent = config.company_name;
     document.title = config.assistant_name + ' AI';
+
+    // Load providers
+    await loadProviders();
 
     // Check auth
     if (token) {
@@ -279,7 +285,11 @@ async function sendMessage() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify({ 
+                message: text,
+                provider: currentProvider,
+                model: currentModel || null
+            })
         });
 
         hideTyping();
@@ -565,4 +575,78 @@ function switchView(view) {
 
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
+}
+
+// =============================================================================
+// AI Provider Selection
+// =============================================================================
+async function loadProviders() {
+    try {
+        const res = await fetch('/providers');
+        const data = await res.json();
+        providers = data.providers;
+        
+        // Set defaults from server if not stored locally
+        if (!localStorage.getItem('nora_provider')) {
+            currentProvider = data.default_provider;
+        }
+        
+        updateProviderUI();
+    } catch (e) {
+        console.error('Failed to load providers:', e);
+    }
+}
+
+function updateProviderUI() {
+    const providerSelect = document.getElementById('providerSelect');
+    const modelSelect = document.getElementById('modelSelect');
+    
+    if (!providerSelect || !modelSelect) return;
+    
+    // Update provider dropdown
+    providerSelect.innerHTML = providers.map(p => {
+        const icon = p.id === 'ollama' ? '🖥️' : '✨';
+        const status = p.status === 'available' ? '' : p.status === 'not_configured' ? ' (No API Key)' : ' (Offline)';
+        return `<option value="${p.id}" ${p.status !== 'available' ? 'disabled' : ''}>${icon} ${p.name}${status}</option>`;
+    }).join('');
+    
+    providerSelect.value = currentProvider;
+    
+    // Update model dropdown for selected provider
+    updateModelDropdown();
+}
+
+function updateModelDropdown() {
+    const modelSelect = document.getElementById('modelSelect');
+    const provider = providers.find(p => p.id === currentProvider);
+    
+    if (!provider || !modelSelect) return;
+    
+    modelSelect.innerHTML = '<option value="">Default Model</option>' + 
+        provider.models.map(m => `<option value="${m}">${m}</option>`).join('');
+    
+    if (currentModel && provider.models.includes(currentModel)) {
+        modelSelect.value = currentModel;
+    }
+}
+
+function onProviderChange() {
+    const providerSelect = document.getElementById('providerSelect');
+    currentProvider = providerSelect.value;
+    localStorage.setItem('nora_provider', currentProvider);
+    
+    updateModelDropdown();
+    
+    const provider = providers.find(p => p.id === currentProvider);
+    showToast(`Switched to ${provider?.name || currentProvider}`, 'success');
+}
+
+function onModelChange() {
+    const modelSelect = document.getElementById('modelSelect');
+    currentModel = modelSelect.value;
+    localStorage.setItem('nora_model', currentModel);
+    
+    if (currentModel) {
+        showToast(`Using model: ${currentModel}`, 'info');
+    }
 }

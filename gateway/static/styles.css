@@ -780,3 +780,40 @@ body {
     color: var(--text-primary);
     border-color: var(--accent);
 }
+
+/* ============ PROVIDER SELECTOR ============ */
+.provider-selector {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.provider-selector select {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.provider-selector select:hover {
+    border-color: var(--accent);
+}
+
+.provider-selector select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.provider-selector select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.provider-selector select option:disabled {
+    color: var(--text-secondary);
+}

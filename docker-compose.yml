@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ==========================================================================
   # PostgreSQL Database - Conversation Memory
@@ -15,7 +13,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Using 5433 externally to avoid conflict
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nora -d nora_db"]
       interval: 10s
@@ -30,7 +28,7 @@ services:
     container_name: nora_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"  # Using 6380 externally to avoid conflict
     volumes:
       - redis_data:/data
     healthcheck:

@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir \
     striprtf==0.0.26 \
     pandas==2.1.3 \
     openpyxl==3.1.2 \
-    xlrd==2.0.1
+    xlrd==2.0.1 \
+    bcrypt==4.1.1
 
 COPY server.py .
 COPY static/ ./static/

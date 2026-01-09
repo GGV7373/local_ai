@@ -8,19 +8,43 @@ import hashlib
 import secrets
 import httpx
 import mimetypes
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, List
-from functools import wraps
+from typing import Optional, List, Dict, Any
+from functools import wraps, lru_cache
+from collections import defaultdict
+import time
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, File, UploadFile, Form, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, File, UploadFile, Form, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import jwt
 
-app = FastAPI(title="Nora AI")
+# Try to import bcrypt for better password hashing
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Nora AI", docs_url="/api/docs", redoc_url="/api/redoc")
+
+# CORS middleware for API access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure this for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =============================================================================
 # Configuration
@@ -53,16 +77,48 @@ ALLOWED_EXTENSIONS = {
 # Security
 security = HTTPBearer(auto_error=False)
 
+# Rate limiting storage
+login_attempts: Dict[str, List[float]] = defaultdict(list)
+RATE_LIMIT_WINDOW = 300  # 5 minutes
+MAX_LOGIN_ATTEMPTS = 5
+
+# Context cache
+_context_cache: Dict[str, Any] = {"content": None, "timestamp": 0}
+CONTEXT_CACHE_TTL = 60  # Cache context for 60 seconds
+
 # =============================================================================
 # Authentication
 # =============================================================================
 def hash_password(password: str) -> str:
-    """Hash a password using SHA-256."""
+    """Hash a password using bcrypt if available, otherwise SHA-256."""
+    if BCRYPT_AVAILABLE:
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     return hashlib.sha256(password.encode()).hexdigest()
 
-def verify_password(password: str, hashed: str) -> bool:
-    """Verify a password against its hash."""
-    return hash_password(password) == hashed
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a password against stored hash."""
+    # For plain text comparison (from env vars)
+    if password == stored:
+        return True
+    # For bcrypt hashed passwords
+    if BCRYPT_AVAILABLE and stored.startswith('$2'):
+        try:
+            return bcrypt.checkpw(password.encode(), stored.encode())
+        except:
+            pass
+    # Fallback to SHA-256 comparison
+    return hashlib.sha256(password.encode()).hexdigest() == stored
+
+def check_rate_limit(ip: str) -> bool:
+    """Check if IP is rate limited. Returns True if allowed."""
+    now = time.time()
+    # Clean old attempts
+    login_attempts[ip] = [t for t in login_attempts[ip] if now - t < RATE_LIMIT_WINDOW]
+    return len(login_attempts[ip]) < MAX_LOGIN_ATTEMPTS
+
+def record_login_attempt(ip: str):
+    """Record a failed login attempt."""
+    login_attempts[ip].append(time.time())
 
 def create_token(username: str) -> str:
     """Create a JWT token."""
@@ -161,8 +217,15 @@ def extract_text_from_file(file_path: Path) -> str:
     except Exception as e:
         return f"[Error reading file {file_path.name}: {str(e)}]"
 
-def load_company_context() -> str:
-    """Load all text files from company_info folder as context."""
+def load_company_context(force_refresh: bool = False) -> str:
+    """Load all text files from company_info folder as context. Uses caching."""
+    global _context_cache
+    
+    now = time.time()
+    if not force_refresh and _context_cache["content"] and (now - _context_cache["timestamp"]) < CONTEXT_CACHE_TTL:
+        return _context_cache["content"]
+    
+    logger.info("Reloading document context...")
     context_parts = []
     
     # Load from company_info directory
@@ -197,7 +260,11 @@ def load_company_context() -> str:
                 except:
                     pass
     
-    return "\n".join(context_parts)
+    result = "\n".join(context_parts)
+    _context_cache["content"] = result
+    _context_cache["timestamp"] = time.time()
+    logger.info(f"Context loaded: {len(result)} characters from {len(context_parts)} sources")
+    return result
 
 def get_config() -> dict:
     """Load company config."""
@@ -302,16 +369,45 @@ async def home():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    """Health check with Ollama status."""
+    ollama_status = "unknown"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(f"{AI_SERVER_URL}/api/tags")
+            if res.status_code == 200:
+                ollama_status = "connected"
+                models = res.json().get("models", [])
+                ollama_status = f"connected ({len(models)} models)"
+    except:
+        ollama_status = "disconnected"
+    
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "ai_provider": AI_PROVIDER,
+        "ai_model": AI_MODEL,
+        "ollama_status": ollama_status
+    }
 
 @app.get("/config")
 async def config():
     return get_config()
 
 @app.post("/auth/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, req: Request):
     """Authenticate user and return JWT token."""
-    if request.username == ADMIN_USERNAME and request.password == ADMIN_PASSWORD:
+    client_ip = req.client.host if req.client else "unknown"
+    
+    # Check rate limiting
+    if not check_rate_limit(client_ip):
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(
+            status_code=429, 
+            detail="Too many login attempts. Please try again in 5 minutes."
+        )
+    
+    if request.username == ADMIN_USERNAME and verify_password(request.password, ADMIN_PASSWORD):
+        logger.info(f"Successful login for user: {request.username} from IP: {client_ip}")
         token = create_token(request.username)
         return {
             "success": True,
@@ -319,6 +415,10 @@ async def login(request: LoginRequest):
             "username": request.username,
             "expires_in": TOKEN_EXPIRE_HOURS * 3600
         }
+    
+    # Record failed attempt
+    record_login_attempt(client_ip)
+    logger.warning(f"Failed login attempt for user: {request.username} from IP: {client_ip}")
     raise HTTPException(status_code=401, detail="Invalid username or password")
 
 @app.get("/auth/verify")

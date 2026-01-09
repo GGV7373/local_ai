@@ -5,6 +5,66 @@ let token = localStorage.getItem('nora_token');
 let currentUser = localStorage.getItem('nora_user');
 let config = { assistant_name: 'Nora', company_name: 'My Company' };
 let currentFileDir = 'uploads';
+let chatHistory = [];
+
+// =============================================================================
+// Toast Notifications
+// =============================================================================
+function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toastContainer') || createToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+        <span class="toast-icon">${type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '⚠' : 'ℹ'}</span>
+        <span class="toast-message">${escapeHtml(message)}</span>
+    `;
+    container.appendChild(toast);
+    
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toastContainer';
+    document.body.appendChild(container);
+    return container;
+}
+
+// =============================================================================
+// Markdown Rendering
+// =============================================================================
+function renderMarkdown(text) {
+    // Code blocks with language
+    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => 
+        `<pre class="code-block${lang ? ` language-${lang}` : ''}"><code>${escapeHtml(code.trim())}</code></pre>`
+    );
+    // Inline code
+    text = text.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+    // Bold
+    text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Italic
+    text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // Headers
+    text = text.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+    text = text.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+    text = text.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+    // Lists
+    text = text.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+    text = text.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    // Numbered lists
+    text = text.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    // Links
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // Line breaks (preserve paragraphs)
+    text = text.replace(/\n\n/g, '</p><p>');
+    text = text.replace(/\n/g, '<br>');
+    
+    return `<p>${text}</p>`;
+}
 
 // =============================================================================
 // Initialization
@@ -160,13 +220,30 @@ function showApp() {
 // =============================================================================
 // Chat
 // =============================================================================
-function addMessage(text, type) {
+function addMessage(text, type, isMarkdown = false) {
     const messages = document.getElementById('messages');
     const div = document.createElement('div');
     div.className = 'message ' + type;
-    div.textContent = text;
+    
+    if (type === 'assistant' && isMarkdown) {
+        div.innerHTML = renderMarkdown(text);
+    } else {
+        div.textContent = text;
+    }
+    
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
+    
+    // Store in history
+    chatHistory.push({ role: type, content: text });
+}
+
+function clearChat() {
+    const messages = document.getElementById('messages');
+    messages.innerHTML = '';
+    chatHistory = [];
+    addMessage(`Hi! I'm ${config.assistant_name}, your AI assistant for ${config.company_name}. How can I help you today?`, 'assistant');
+    showToast('Chat cleared', 'success');
 }
 
 function showTyping() {
@@ -213,10 +290,11 @@ async function sendMessage() {
         }
 
         const data = await res.json();
-        addMessage(data.response, 'assistant');
+        addMessage(data.response, 'assistant', true);
     } catch (e) {
         hideTyping();
         addMessage('Sorry, something went wrong. Please try again.', 'assistant');
+        showToast('Failed to send message', 'error');
     }
 
     document.getElementById('sendBtn').disabled = false;
@@ -303,15 +381,45 @@ async function viewFile(path) {
         const data = await res.json();
         
         document.getElementById('modalTitle').textContent = data.filename;
-        document.getElementById('modalContent').textContent = data.content;
+        const content = document.getElementById('modalContent');
+        
+        // Apply markdown rendering for certain file types
+        if (path.endsWith('.md')) {
+            content.innerHTML = renderMarkdown(data.content);
+        } else {
+            content.textContent = data.content;
+        }
+        
         document.getElementById('fileModal').classList.add('active');
     } catch (e) {
-        alert('Error loading file');
+        showToast('Error loading file', 'error');
     }
 }
 
-function downloadFile(path) {
-    window.open(`/files/download/${currentFileDir}/${path}`, '_blank');
+async function downloadFile(path) {
+    try {
+        const res = await fetch(`/files/download/${currentFileDir}/${path}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!res.ok) {
+            showToast('Error downloading file', 'error');
+            return;
+        }
+        
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = path;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+        showToast('Download started', 'success');
+    } catch (e) {
+        showToast('Error downloading file', 'error');
+    }
 }
 
 async function deleteFile(path) {
@@ -324,13 +432,14 @@ async function deleteFile(path) {
         });
 
         if (res.ok) {
+            showToast('File deleted successfully', 'success');
             loadFiles();
         } else {
             const data = await res.json();
-            alert(data.detail || 'Error deleting file');
+            showToast(data.detail || 'Error deleting file', 'error');
         }
     } catch (e) {
-        alert('Error deleting file');
+        showToast('Error deleting file', 'error');
     }
 }
 
@@ -339,6 +448,12 @@ function closeModal() {
 }
 
 async function handleFiles(files) {
+    const uploadCount = files.length;
+    let successCount = 0;
+    let errorCount = 0;
+    
+    showToast(`Uploading ${uploadCount} file(s)...`, 'info');
+    
     for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
@@ -351,14 +466,23 @@ async function handleFiles(files) {
                 body: formData
             });
 
-            if (!res.ok) {
+            if (res.ok) {
+                successCount++;
+            } else {
+                errorCount++;
                 const data = await res.json();
-                alert(`Error uploading ${file.name}: ${data.detail}`);
+                showToast(`Error uploading ${file.name}: ${data.detail}`, 'error');
             }
         } catch (e) {
-            alert(`Error uploading ${file.name}`);
+            errorCount++;
+            showToast(`Error uploading ${file.name}`, 'error');
         }
     }
+    
+    if (successCount > 0) {
+        showToast(`Successfully uploaded ${successCount} file(s)`, 'success');
+    }
+    
     loadFiles();
     document.getElementById('fileInput').value = '';
 }

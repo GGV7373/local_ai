@@ -76,6 +76,9 @@
             <!-- Chat View -->
             <div id="chatView" class="content-body">
                 <div class="chat-container">
+                    <div class="chat-header" style="padding: 10px 15px; display: flex; justify-content: flex-end; border-bottom: 1px solid var(--border);">
+                        <button class="clear-chat-btn" onclick="clearChat()">🗑️ Clear Chat</button>
+                    </div>
                     <div class="messages" id="messages"></div>
                     <div class="chat-input-area">
                         <input type="text" class="chat-input" id="chatInput" placeholder="Type your message..." autofocus>

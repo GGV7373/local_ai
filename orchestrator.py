@@ -46,17 +46,27 @@ def main():
     config_path = "config.json"
     config = load_config(config_path)
 
+    # Get config values with defaults
+    wake_word = config.get("wake_word", "hey nora")
+    vosk_model_path = config.get("vosk_model_path", "vosk_model")
+    whisper_model = config.get("whisper_model", "base")
+    llm_model = config.get("llm_model", "llama2")
+    recording_duration = config.get("recording_duration", 5)
+    sample_rate = config.get("sample_rate", 16000)
+
     print("Initializing Local AI Assistant...")
     print(f"Wake word engine: {config.get('wake_word_engine', 'vosk')}")
-    print(f"STT engine: {config.get('stt_engine', 'whisper')}")
-    print(f"LLM backend: {config.get('llm_backend', 'llama2')}")
+    print(f"Wake word: '{wake_word}'")
+    print(f"STT engine: {config.get('stt_engine', 'whisper')} (model: {whisper_model})")
+    print(f"LLM backend: {config.get('llm_backend', 'ollama')} (model: {llm_model})")
     print(f"TTS engine: {config.get('tts_engine', 'pyttsx3')}")
+    print(f"Recording duration: {recording_duration}s")
     print()
 
-    # Initialize components
-    wake_word_engine = VoskWakeWordEngine("vosk_model", wake_word="hey nora")
-    stt_engine = WhisperSTTEngine()
-    llm_backend = LlamaBackend(model_name="llama2")
+    # Initialize components using config values
+    wake_word_engine = VoskWakeWordEngine(vosk_model_path, wake_word=wake_word)
+    stt_engine = WhisperSTTEngine(model_name=whisper_model)
+    llm_backend = LlamaBackend(model_name=llm_model)
     tts_engine = CoquiTTSEngine()
 
     def on_wake_word_detected():
@@ -65,7 +75,7 @@ def main():
         print("="*50)
         
         # Record audio (Windows compatible)
-        record_audio("command.wav", duration=5)
+        record_audio("command.wav", duration=recording_duration, sample_rate=sample_rate)
         
         # Transcribe audio to text
         command = stt_engine.transcribe("command.wav")
@@ -80,7 +90,7 @@ def main():
         print("\nReady for next command...\n")
 
     print("Local AI Assistant is ready!")
-    print("Say 'hey nora' to activate.")
+    print(f"Say '{wake_word}' to activate.")
     print("Press Ctrl+C to stop.\n")
 
     try:

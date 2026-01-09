@@ -1,0 +1,11 @@
+{
+    "gateway_host": "0.0.0.0",
+    "gateway_port": 8765,
+    "ai_server_url": "http://localhost:11434",
+    "ai_model": "llama2",
+    "max_response_length": 2000,
+    "request_timeout": 60,
+    "enable_websocket": true,
+    "enable_rest": true,
+    "log_level": "INFO"
+}

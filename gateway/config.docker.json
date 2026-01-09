@@ -1,0 +1,13 @@
+{
+    "gateway_host": "0.0.0.0",
+    "gateway_port": 8765,
+    "ai_server_url": "http://ollama:11434",
+    "ai_model": "llama2",
+    "max_response_length": 2000,
+    "request_timeout": 60,
+    "enable_websocket": true,
+    "enable_rest": true,
+    "enable_memory": true,
+    "memory_context_length": 10,
+    "log_level": "INFO"
+}

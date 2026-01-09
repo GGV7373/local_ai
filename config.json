@@ -1,6 +1,12 @@
 {
-  "wake_word_engine": "snowboy",
+  "wake_word_engine": "vosk",
+  "wake_word": "hey nora",
+  "vosk_model_path": "vosk_model",
   "stt_engine": "whisper",
-  "llm_backend": "llama2",
-  "tts_engine": "coqui"
+  "whisper_model": "base",
+  "llm_backend": "ollama",
+  "llm_model": "llama2",
+  "tts_engine": "pyttsx3",
+  "recording_duration": 5,
+  "sample_rate": 16000
 }

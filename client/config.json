@@ -1,0 +1,17 @@
+{
+    "gateway_url": "ws://localhost:8765/ws",
+    "gateway_rest_url": "http://localhost:8765/api/command",
+    "use_websocket": true,
+    "wake_word": "hey nora",
+    "vosk_model_path": "../vosk_model",
+    "whisper_model": "base",
+    "command_duration": 5,
+    "sample_rate": 16000,
+    "greeting_message": "Hello boss, how can I help?",
+    "tts_rate": 150,
+    "tts_volume": 1.0,
+    "auto_reconnect": true,
+    "reconnect_delay": 5,
+    "client_id": null,
+    "log_level": "INFO"
+}

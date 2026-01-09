@@ -1,0 +1,6 @@
+{
+  "wake_word_engine": "snowboy",
+  "stt_engine": "whisper",
+  "llm_backend": "llama2",
+  "tts_engine": "coqui"
+}

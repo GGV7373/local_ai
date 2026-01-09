@@ -97,6 +97,64 @@ else
 fi
 echo -e "${GREEN}✓${NC} Docker Compose available"
 
+# =============================================================================
+# Fix DNS Resolution (Common WSL Issue)
+# =============================================================================
+fix_dns() {
+    echo -e "${BLUE}🌐 Checking DNS resolution...${NC}"
+    
+    # Test DNS
+    if ! nslookup google.com &>/dev/null && ! ping -c 1 google.com &>/dev/null; then
+        echo -e "${YELLOW}⚠️  DNS resolution issue detected. Attempting fix...${NC}"
+        
+        # Check if running in WSL
+        if grep -qi microsoft /proc/version 2>/dev/null; then
+            echo -e "${CYAN}   WSL detected - applying DNS fix...${NC}"
+            
+            # Backup existing resolv.conf
+            if [ -f /etc/resolv.conf ]; then
+                sudo cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
+            fi
+            
+            # Create new resolv.conf with public DNS
+            echo -e "# Fixed by Nora AI setup\nnameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1" | sudo tee /etc/resolv.conf > /dev/null
+            
+            # Prevent WSL from overwriting
+            if [ -f /etc/wsl.conf ]; then
+                if ! grep -q "generateResolvConf" /etc/wsl.conf; then
+                    echo -e "\n[network]\ngenerateResolvConf = false" | sudo tee -a /etc/wsl.conf > /dev/null
+                fi
+            else
+                echo -e "[network]\ngenerateResolvConf = false" | sudo tee /etc/wsl.conf > /dev/null
+            fi
+            
+            echo -e "${GREEN}✓${NC} DNS fix applied (using Google & Cloudflare DNS)"
+            echo -e "${YELLOW}   Note: Restart WSL with 'wsl --shutdown' if issues persist${NC}"
+        else
+            # Non-WSL Linux - suggest manual fix
+            echo -e "${YELLOW}   Adding Google DNS to resolv.conf...${NC}"
+            echo "nameserver 8.8.8.8" | sudo tee -a /etc/resolv.conf > /dev/null
+            echo -e "${GREEN}✓${NC} Added Google DNS"
+        fi
+        
+        # Test again
+        sleep 2
+        if nslookup google.com &>/dev/null || ping -c 1 google.com &>/dev/null; then
+            echo -e "${GREEN}✓${NC} DNS is now working!"
+        else
+            echo -e "${RED}⚠️  DNS may still have issues. Try:${NC}"
+            echo "   1. Run: wsl --shutdown (from PowerShell)"
+            echo "   2. Restart WSL and run setup again"
+        fi
+    else
+        echo -e "${GREEN}✓${NC} DNS resolution working"
+    fi
+    echo ""
+}
+
+# Run DNS fix
+fix_dns
+
 # Create directories
 mkdir -p company_info gateway/static uploads
 
@@ -217,8 +275,45 @@ echo ""
 echo -e "${YELLOW}⏳ Waiting for Ollama to start...${NC}"
 sleep 10
 
-echo -e "${BLUE}📥 Downloading AI model '$MODEL'...${NC}"
-docker exec nora_ollama ollama pull $MODEL
+# =============================================================================
+# Pull AI Model with Retry
+# =============================================================================
+pull_model() {
+    local model=$1
+    local max_retries=3
+    local retry=0
+    
+    echo -e "${BLUE}📥 Downloading AI model '$model'...${NC}"
+    echo -e "${CYAN}   This may take a while depending on model size and connection speed.${NC}"
+    echo ""
+    
+    while [ $retry -lt $max_retries ]; do
+        if docker exec nora_ollama ollama pull $model; then
+            echo -e "${GREEN}✓${NC} Model '$model' downloaded successfully!"
+            return 0
+        else
+            retry=$((retry + 1))
+            if [ $retry -lt $max_retries ]; then
+                echo -e "${YELLOW}⚠️  Download failed. Retrying ($retry/$max_retries)...${NC}"
+                echo -e "${CYAN}   Checking DNS...${NC}"
+                
+                # Try to fix DNS inside the container
+                docker exec nora_ollama sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf' 2>/dev/null || true
+                sleep 5
+            fi
+        fi
+    done
+    
+    echo -e "${RED}❌ Failed to download model after $max_retries attempts.${NC}"
+    echo -e "${YELLOW}   Common fixes:${NC}"
+    echo "   1. Check internet connection"
+    echo "   2. Run: wsl --shutdown (from PowerShell), then restart WSL"
+    echo "   3. Try manually: docker exec -it nora_ollama ollama pull $model"
+    echo ""
+    return 1
+}
+
+pull_model $MODEL
 
 # =============================================================================
 # Cloudflare Tunnel Status

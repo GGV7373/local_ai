@@ -11,6 +11,17 @@ echo "  Nora AI - Update"
 echo "=============================================="
 echo ""
 
+# Check if Docker requires sudo
+if ! docker info &> /dev/null 2>&1; then
+    if sudo docker info &> /dev/null 2>&1; then
+        echo "Note: Docker requires sudo. Re-running with sudo..."
+        exec sudo "$0" "$@"
+    else
+        echo "ERROR: Docker daemon is not running."
+        exit 1
+    fi
+fi
+
 # Check for docker compose
 COMPOSE_CMD=""
 if docker compose version &> /dev/null 2>&1; then

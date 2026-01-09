@@ -11,11 +11,6 @@ echo "  Nora AI - Linux Server Deployment"
 echo "=============================================="
 echo ""
 
-# Check if running as root (warn but don't fail)
-if [ "$EUID" -eq 0 ]; then
-    echo "Note: Running as root. Consider using a non-root user with docker group."
-fi
-
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
     echo "ERROR: Docker is not installed."
@@ -35,14 +30,20 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Check if Docker daemon is running
-if ! docker info &> /dev/null; then
-    echo "ERROR: Docker daemon is not running."
-    echo ""
-    echo "Start Docker with one of these commands:"
-    echo "  sudo systemctl start docker    # systemd (most distros)"
-    echo "  sudo rc-service docker start   # OpenRC (Gentoo, Alpine)"
-    echo ""
-    exit 1
+if ! docker info &> /dev/null 2>&1; then
+    # Check if it's a permission issue or daemon not running
+    if sudo docker info &> /dev/null 2>&1; then
+        echo "Note: Docker requires sudo. Re-running with sudo..."
+        exec sudo "$0" "$@"
+    else
+        echo "ERROR: Docker daemon is not running."
+        echo ""
+        echo "Start Docker with one of these commands:"
+        echo "  sudo systemctl start docker    # systemd (most distros)"
+        echo "  sudo rc-service docker start   # OpenRC (Gentoo, Alpine)"
+        echo ""
+        exit 1
+    fi
 fi
 
 # Check for docker compose (v2 plugin or standalone)

@@ -90,10 +90,23 @@ if [ -f "gateway/server_enhanced.py" ]; then
     echo "Using enhanced server with memory support"
 fi
 
-# Start services
+# Check for Cloudflare Tunnel configuration
+USE_TUNNEL="false"
+TUNNEL_TOKEN=""
+if [ -f ".env" ]; then
+    USE_TUNNEL=$(grep "^USE_CLOUDFLARE=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "false")
+    TUNNEL_TOKEN=$(grep "^CLOUDFLARE_TUNNEL_TOKEN=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
+fi
+
+# Start services with appropriate profile
 echo ""
 echo "Starting services..."
-$COMPOSE_CMD up -d
+if [ "$USE_TUNNEL" = "true" ] && [ -n "$TUNNEL_TOKEN" ]; then
+    echo "Starting with Cloudflare Tunnel..."
+    $COMPOSE_CMD --profile tunnel up -d
+else
+    $COMPOSE_CMD up -d
+fi
 
 # Wait for Ollama to be ready
 echo ""
@@ -122,6 +135,16 @@ echo "  - Gateway:   http://localhost:8765"
 echo "  - Web UI:    http://localhost:8765"
 echo "  - Ollama:    http://localhost:11434"
 echo "  - Postgres:  localhost:5433"
+
+if [ "$USE_TUNNEL" = "true" ] && [ -n "$TUNNEL_TOKEN" ]; then
+    DOMAIN=$(grep "^DOMAIN=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
+    if [ -n "$DOMAIN" ]; then
+        echo ""
+        echo "Cloudflare Tunnel active!"
+        echo "  - Public URL: https://$DOMAIN"
+    fi
+fi
+
 echo ""
 echo "AI Model: $AI_MODEL"
 echo ""

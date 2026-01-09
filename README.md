@@ -1,15 +1,16 @@
 # Nora AI - Self-Hosted AI Assistant
 
-A self-hosted AI assistant with web chat interface, conversation memory, and optional SSL support.
+A self-hosted AI assistant with web chat interface, conversation memory, and secure access via Cloudflare Tunnel.
 
 ## Features
 
 - 🤖 **Local AI** - Runs Ollama with llama2 (or any model)
 - 🌐 **Web Chat** - Browser-based chat interface
 - 💾 **Memory** - PostgreSQL-backed conversation history
-- 🔒 **SSL Ready** - Let's Encrypt integration
+- 🔒 **Secure Access** - Cloudflare Tunnel (no open ports) or SSL
 - 🎨 **Customizable** - Company branding support
 - 📝 **Transcripts** - Export conversations to text
+- 🔑 **Multi-Provider** - Ollama (local) or Google Gemini (cloud)
 
 ## Quick Start
 
@@ -28,15 +29,67 @@ cd /path/to/nora-ai
 # Make scripts executable
 chmod +x *.sh
 
-# Deploy (downloads AI model automatically)
+# Run interactive setup wizard
+./setup.sh
+
+# Deploy
 ./deploy.sh
 ```
 
 Access the web UI at `http://your-server:8765`
 
-## Configuration
+## Setup Wizard
 
-### Environment Variables
+The interactive `setup.sh` script configures everything:
+
+### 1. Company Information
+- Company name and assistant name
+- Custom greeting message
+- Brand colors
+- System prompt (AI personality)
+
+### 2. AI Provider
+- **Ollama** - Local, free, private (default)
+- **Google Gemini** - Cloud-based, requires API key
+- **Both** - Gemini primary with Ollama fallback
+
+### 3. Database
+- PostgreSQL database name
+- Username and auto-generated secure password
+- All stored in `.env`
+
+### 4. Secure Access
+- **Local only** - http://localhost:8765
+- **Cloudflare Tunnel** - Secure public access, no open ports
+- **Custom Domain + SSL** - Let's Encrypt certificates
+
+## Cloudflare Tunnel (Recommended)
+
+Secure access without opening firewall ports:
+
+1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
+2. Navigate to **Networks → Tunnels**
+3. Create a tunnel, copy the token
+4. Run `./setup.sh` and select Cloudflare Tunnel option
+5. Configure the tunnel to point to: `http://gateway:8765`
+
+**Benefits:**
+- 🔒 No open ports needed
+- 🔐 Free automatic SSL
+- 🛡️ DDoS protection included
+- 🌐 Works behind NAT/firewalls
+
+## Configuration Files
+
+After running `setup.sh`:
+
+| File | Purpose |
+|------|---------|
+| `.env` | All environment variables |
+| `company_info/config.json` | Company branding |
+| `company_info/system_prompt.txt` | AI personality |
+
+### Manual Configuration
 
 Copy and edit `.env.example`:
 
@@ -46,49 +99,17 @@ nano .env
 ```
 
 Key settings:
-- `AI_MODEL` - Ollama model (default: llama2)
+- `AI_MODEL` - Ollama model (llama2, mistral, llama3)
 - `AI_PROVIDER` - auto, ollama, or gemini
-- `GEMINI_API_KEY` - Optional Google Gemini API key
-
-### Company Branding
-
-Edit `company_info/config.json`:
-
-```json
-{
-  "company_name": "Your Company",
-  "assistant_name": "Nora",
-  "greeting": "Hello! How can I help you today?"
-}
-```
-
-Add a custom system prompt in `company_info/system_prompt.txt`.
-
-## SSL Setup (Optional)
-
-For HTTPS with a custom domain:
-
-```bash
-# Add to .env
-DOMAIN=ai.yourdomain.com
-SSL_EMAIL=admin@yourdomain.com
-
-# Run SSL setup
-./setup_ssl.sh
-```
-
-## Updating
-
-```bash
-./update.sh
-```
-
-This preserves your `.env` and `company_info/` settings.
+- `GEMINI_API_KEY` - Google Gemini API key
+- `USE_CLOUDFLARE` - Enable Cloudflare Tunnel
+- `CLOUDFLARE_TUNNEL_TOKEN` - Your tunnel token
 
 ## Directory Structure
 
 ```
-├── deploy.sh           # Main deployment script
+├── setup.sh            # Interactive setup wizard
+├── deploy.sh           # Deployment script
 ├── update.sh           # Update script
 ├── setup_ssl.sh        # SSL certificate setup
 ├── setup_git.sh        # Git repository setup
@@ -99,26 +120,25 @@ This preserves your `.env` and `company_info/` settings.
 │   ├── database.py
 │   ├── ai_providers.py
 │   ├── transcript.py
-│   ├── static/         # Web UI files
+│   ├── static/
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── company_info/       # Your branding
 │   ├── config.json
 │   └── system_prompt.txt
-├── nginx/              # Reverse proxy (SSL)
-│   └── nginx.conf.template
-└── transcripts/        # Exported conversations
+└── nginx/              # Reverse proxy (SSL)
 ```
 
 ## Services
 
-| Service  | Port  | Description |
-|----------|-------|-------------|
-| Gateway  | 8765  | API + Web UI |
-| Ollama   | 11434 | LLM server |
-| Postgres | 5433  | Database |
-| Redis    | 6380  | Cache |
-| Nginx    | 443   | SSL proxy (optional) |
+| Service | Port | Description |
+|---------|------|-------------|
+| Gateway | 8765 | API + Web UI |
+| Ollama | 11434 | LLM server |
+| Postgres | 5433 | Database |
+| Redis | 6380 | Cache |
+| Cloudflared | - | Tunnel (optional) |
+| Nginx | 443 | SSL proxy (optional) |
 
 ## Commands
 
@@ -134,7 +154,18 @@ docker compose down
 
 # Pull different AI model
 docker exec nora_ollama ollama pull mistral
+
+# Update to latest version
+./update.sh
 ```
+
+## Updating
+
+```bash
+./update.sh
+```
+
+This preserves your `.env` and `company_info/` settings.
 
 ## Supported Distros
 

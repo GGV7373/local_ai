@@ -255,8 +255,8 @@
 <body>
     <div class="container">
         <header>
-            <h1>🤖 Nora AI Assistant</h1>
-            <p>Your local AI companion</p>
+            <h1 id="headerTitle">🤖 Nora AI Assistant</h1>
+            <p id="headerTagline">Your local AI companion</p>
             <div class="status">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">Connecting...</span>
@@ -264,12 +264,13 @@
             <div class="session-info" id="sessionInfo"></div>
             <div class="controls">
                 <button onclick="newSession()">New Chat</button>
+                <button onclick="downloadTranscript()">Download</button>
                 <button onclick="clearChat()">Clear</button>
             </div>
         </header>
 
         <div class="chat-container" id="chatContainer">
-            <div class="message system">
+            <div class="message system" id="welcomeMessage">
                 Welcome! Type a message or click the microphone to speak.
             </div>
         </div>
@@ -298,6 +299,7 @@
         // Configuration
         const WS_URL = `ws://${window.location.host}/ws`;
         const REST_URL = `/api/command`;
+        const COMPANY_URL = `/api/company`;
         
         // State
         let ws = null;
@@ -305,6 +307,7 @@
         let sessionId = null;
         let isRecording = false;
         let recognition = null;
+        let companyConfig = {};
 
         // Save client ID
         localStorage.setItem('clientId', clientId);
@@ -312,6 +315,39 @@
         // Generate unique ID
         function generateId() {
             return 'web_' + Math.random().toString(36).substr(2, 8);
+        }
+
+        // Load company configuration
+        async function loadCompanyConfig() {
+            try {
+                const response = await fetch(COMPANY_URL);
+                if (response.ok) {
+                    companyConfig = await response.json();
+                    applyCompanyBranding();
+                }
+            } catch (error) {
+                console.log('Using default branding');
+            }
+        }
+
+        // Apply company branding to UI
+        function applyCompanyBranding() {
+            if (companyConfig.company_name) {
+                document.title = `${companyConfig.assistant_name || 'AI'} - ${companyConfig.company_name}`;
+            }
+            if (companyConfig.assistant_name) {
+                document.getElementById('headerTitle').textContent = 
+                    `🤖 ${companyConfig.assistant_name} AI Assistant`;
+            }
+            if (companyConfig.tagline) {
+                document.getElementById('headerTagline').textContent = companyConfig.tagline;
+            }
+            if (companyConfig.greeting) {
+                document.getElementById('welcomeMessage').textContent = companyConfig.greeting;
+            }
+            if (companyConfig.primary_color) {
+                document.documentElement.style.setProperty('--primary-color', companyConfig.primary_color);
+            }
         }
 
         // Connect WebSocket
@@ -541,6 +577,35 @@
             }
         }
 
+        // Download transcript
+        function downloadTranscript() {
+            if (!sessionId) {
+                alert('No conversation to download yet.');
+                return;
+            }
+            
+            // Open download in new tab/trigger download
+            const url = `/api/conversations/${clientId}/${sessionId}/export?format=txt`;
+            
+            fetch(url)
+                .then(response => response.text())
+                .then(text => {
+                    // Create download
+                    const blob = new Blob([text], { type: 'text/plain' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `transcript_${sessionId}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(a.href);
+                })
+                .catch(error => {
+                    console.error('Download failed:', error);
+                    alert('Failed to download transcript.');
+                });
+        }
+
         // Heartbeat
         setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -549,6 +614,7 @@
         }, 30000);
 
         // Initialize
+        loadCompanyConfig();
         connect();
     </script>
 </body>

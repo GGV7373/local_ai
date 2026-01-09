@@ -7,6 +7,8 @@ A scalable FastAPI server that:
 - Stores conversation history in PostgreSQL
 - Supports multiple clients via WebSocket and REST
 - Serves a web interface for browser-based chat
+- Supports multiple AI providers (Ollama, Gemini)
+- Exports transcripts to downloadable text files
 
 This gateway NEVER processes audio - it only handles text.
 """
@@ -20,11 +22,10 @@ from datetime import datetime
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
-import ollama
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 # Database imports
@@ -34,21 +35,42 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+# AI Provider imports
+try:
+    from ai_providers import get_ai_provider, AIProvider
+    AI_PROVIDERS_AVAILABLE = True
+except ImportError:
+    AI_PROVIDERS_AVAILABLE = False
+
+# Transcript imports
+try:
+    from transcript import format_transcript, format_notes
+    TRANSCRIPT_AVAILABLE = True
+except ImportError:
+    TRANSCRIPT_AVAILABLE = False
+
 # Load configuration
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+COMPANY_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "company_info", "config.json")
 
 
 def load_config():
     """Load gateway configuration from config.json."""
+    config = {}
+    
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
+            config = json.load(f)
+    
     # Default configuration (can be overridden by environment variables)
-    return {
+    defaults = {
         "gateway_host": os.getenv("GATEWAY_HOST", "0.0.0.0"),
         "gateway_port": int(os.getenv("GATEWAY_PORT", "8765")),
         "ai_server_url": os.getenv("AI_SERVER_URL", "http://ollama:11434"),
         "ai_model": os.getenv("AI_MODEL", "llama2"),
+        "ai_provider": os.getenv("AI_PROVIDER", "auto"),  # auto, ollama, gemini
+        "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-pro"),
         "max_response_length": int(os.getenv("MAX_RESPONSE_LENGTH", "2000")),
         "request_timeout": int(os.getenv("REQUEST_TIMEOUT", "60")),
         "enable_websocket": True,
@@ -57,9 +79,29 @@ def load_config():
         "memory_context_length": int(os.getenv("MEMORY_CONTEXT_LENGTH", "10")),
         "log_level": os.getenv("LOG_LEVEL", "INFO")
     }
+    
+    # Merge defaults with loaded config
+    for key, value in defaults.items():
+        if key not in config:
+            config[key] = value
+    
+    return config
+
+
+def load_company_config():
+    """Load company configuration."""
+    if os.path.exists(COMPANY_CONFIG_PATH):
+        with open(COMPANY_CONFIG_PATH, "r") as f:
+            return json.load(f)
+    return {
+        "company_name": "AI Assistant",
+        "assistant_name": "Nora",
+        "greeting": "Hello! How can I help you?"
+    }
 
 
 config = load_config()
+company_config = load_company_config()
 
 # Configure logging
 logging.basicConfig(
@@ -67,6 +109,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("gateway")
+
+# Initialize AI provider
+ai_provider = None
 
 
 # ============================================================================
@@ -76,8 +121,19 @@ logger = logging.getLogger("gateway")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
+    global ai_provider
+    
     # Startup
     logger.info("Starting Audio Gateway...")
+    
+    # Initialize AI provider
+    if AI_PROVIDERS_AVAILABLE:
+        try:
+            ai_provider = get_ai_provider(config)
+            logger.info(f"AI provider initialized: {type(ai_provider).__name__}")
+        except Exception as e:
+            logger.warning(f"AI provider initialization failed: {e}")
+            logger.info("Falling back to direct Ollama")
     
     if DB_AVAILABLE and config.get("enable_memory", True):
         try:
@@ -155,39 +211,42 @@ class ConversationResponse(BaseModel):
 
 async def query_ai_server(text: str, context: Optional[List[dict]] = None) -> str:
     """
-    Forward text to the existing AI server and return the response.
+    Forward text to the AI provider and return the response.
     
     Args:
         text: The user's message
         context: Optional conversation history for context
     """
+    global ai_provider
+    
     try:
-        logger.info(f"Forwarding to AI server: {text[:100]}...")
+        logger.info(f"Forwarding to AI: {text[:100]}...")
         
-        # Build messages list with context
-        messages = []
-        
-        # Add system prompt
-        messages.append({
-            "role": "system",
-            "content": "You are Nora, a helpful AI assistant. Be concise and helpful."
-        })
-        
-        # Add conversation context if available
-        if context:
-            messages.extend(context)
-        
-        # Add current message
-        messages.append({"role": "user", "content": text})
-        
-        # Use the ollama library to communicate with the AI server
-        response = await asyncio.to_thread(
-            ollama.chat,
-            model=config.get("ai_model", "llama2"),
-            messages=messages
-        )
-        
-        ai_response = response["message"]["content"].strip()
+        # Use AI provider if available
+        if ai_provider:
+            ai_response = await ai_provider.generate(text, context)
+        else:
+            # Fallback to direct Ollama
+            import ollama
+            
+            messages = []
+            messages.append({
+                "role": "system",
+                "content": f"You are {company_config.get('assistant_name', 'Nora')}, a helpful AI assistant for {company_config.get('company_name', 'the company')}. Be concise and helpful."
+            })
+            
+            if context:
+                messages.extend(context)
+            
+            messages.append({"role": "user", "content": text})
+            
+            response = await asyncio.to_thread(
+                ollama.chat,
+                model=config.get("ai_model", "llama2"),
+                messages=messages
+            )
+            
+            ai_response = response["message"]["content"].strip()
         
         # Truncate if needed
         max_length = config.get("max_response_length", 2000)
@@ -198,7 +257,7 @@ async def query_ai_server(text: str, context: Optional[List[dict]] = None) -> st
         return ai_response
         
     except Exception as e:
-        logger.error(f"Error querying AI server: {e}")
+        logger.error(f"Error querying AI: {e}")
         return f"I'm sorry, I couldn't process your request. Error: {str(e)}"
 
 
@@ -375,6 +434,97 @@ async def get_messages(client_id: str, session_id: str, limit: int = 50):
     except Exception as e:
         logger.error(f"Failed to get messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Transcript Export Endpoints
+# ============================================================================
+
+@app.get("/api/conversations/{client_id}/{session_id}/export")
+async def export_transcript(
+    client_id: str, 
+    session_id: str, 
+    format: str = "txt"
+):
+    """
+    Export conversation as downloadable text file.
+    
+    Args:
+        format: 'txt' for plain text, 'notes' for condensed notes, 'json' for raw data
+    """
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        messages = await MemoryStore.get_conversation_history(session_id, limit=1000)
+        
+        if not messages:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        if format == "json":
+            return {
+                "session_id": session_id,
+                "client_id": client_id,
+                "exported_at": datetime.utcnow().isoformat(),
+                "messages": messages
+            }
+        
+        elif format == "notes":
+            if TRANSCRIPT_AVAILABLE:
+                content = format_notes(
+                    messages,
+                    title=f"Conversation {session_id}"
+                )
+            else:
+                content = "\n".join([
+                    f"{'Q' if m['role']=='user' else 'A'}: {m['content']}" 
+                    for m in messages
+                ])
+            
+            return PlainTextResponse(
+                content=content,
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f"attachment; filename=notes_{session_id}.txt"
+                }
+            )
+        
+        else:  # txt format
+            if TRANSCRIPT_AVAILABLE:
+                content = format_transcript(
+                    messages,
+                    company_name=company_config.get("company_name", "AI Assistant"),
+                    assistant_name=company_config.get("assistant_name", "Nora"),
+                    session_id=session_id
+                )
+            else:
+                # Simple fallback format
+                lines = [f"Conversation Transcript - {session_id}", "=" * 40, ""]
+                for msg in messages:
+                    role = "You" if msg["role"] == "user" else company_config.get("assistant_name", "AI")
+                    lines.append(f"{role}: {msg['content']}")
+                    lines.append("")
+                content = "\n".join(lines)
+            
+            return PlainTextResponse(
+                content=content,
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f"attachment; filename=transcript_{session_id}.txt"
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export transcript: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/company")
+async def get_company_info():
+    """Get company configuration for UI customization."""
+    return company_config
 
 
 # ============================================================================

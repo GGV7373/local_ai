@@ -73,9 +73,16 @@ services:
       GATEWAY_HOST: "0.0.0.0"
       GATEWAY_PORT: "8765"
       
-      # AI server (Ollama)
+      # AI Provider: auto, ollama, or gemini
+      AI_PROVIDER: "${AI_PROVIDER:-auto}"
+      
+      # Ollama settings
       AI_SERVER_URL: "http://ollama:11434"
-      AI_MODEL: "llama2"
+      AI_MODEL: "${AI_MODEL:-llama2}"
+      
+      # Gemini settings (optional - set in .env file)
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-pro}"
       
       # Database connection
       DATABASE_URL: "postgresql+asyncpg://nora:nora_password@postgres:5432/nora_db"
@@ -86,6 +93,9 @@ services:
       
       # Logging
       LOG_LEVEL: "INFO"
+    volumes:
+      - ./company_info:/app/company_info:ro
+      - ./transcripts:/app/transcripts
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,6 +108,23 @@ services:
       retries: 3
 
   # ==========================================================================
+  # Nginx - Reverse Proxy with SSL (Optional - for custom domain)
+  # ==========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: nora_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certbot/conf:/etc/letsencrypt:ro
+      - ./nginx/certbot/www:/var/www/certbot:ro
+    depends_on:
+      - gateway
+    profiles:
+      - ssl  # Only starts when: docker compose --profile ssl up
   # Nginx - Reverse Proxy (Optional, for production)
   # ==========================================================================
   # nginx:

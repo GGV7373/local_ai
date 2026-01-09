@@ -1,0 +1,12 @@
+{
+    "company_name": "Your Company Name",
+    "assistant_name": "Nora",
+    "domain": "ai.yourcompany.com",
+    "email": "admin@yourcompany.com",
+    "logo_url": "/static/logo.png",
+    "primary_color": "#00d9ff",
+    "secondary_color": "#00ff88",
+    "greeting": "Hello! How can I assist you today?",
+    "wake_word": "hey nora",
+    "tagline": "Your AI Assistant"
+}

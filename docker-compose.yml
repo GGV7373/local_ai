@@ -143,9 +143,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: nora_cloudflared
     restart: unless-stopped
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - gateway
     profiles:
@@ -162,5 +160,5 @@ volumes:
     driver: local
 
 networks:
-  default:
-    name: nora_network
+  nora_network:
+    driver: bridge

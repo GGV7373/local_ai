@@ -139,19 +139,26 @@ case $ACCESS_CHOICE in
     2)
         USE_CLOUDFLARE="true"
         echo ""
-        echo "Cloudflare Tunnel provides secure access without opening ports."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  CLOUDFLARE TUNNEL SETUP"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo "To get a tunnel token:"
-        echo "  1. Go to https://one.dash.cloudflare.com/"
-        echo "  2. Select your account → Zero Trust → Networks → Tunnels"
-        echo "  3. Create a tunnel, copy the token"
+        echo "1. Go to: https://one.dash.cloudflare.com/"
+        echo "2. Zero Trust → Networks → Tunnels → Create"
+        echo "3. Name it (e.g., nora-ai)"
+        echo "4. Copy the token (the long string)"
         echo ""
-        read -p "Cloudflare Tunnel Token: " CLOUDFLARE_TOKEN
+        echo "Paste your tunnel token:"
+        read -p "> " CLOUDFLARE_TOKEN
         if [ -z "$CLOUDFLARE_TOKEN" ]; then
             echo "Warning: No token provided, using local access only"
             USE_CLOUDFLARE="false"
         else
-            read -p "Your domain (e.g., ai.example.com): " DOMAIN
+            echo ""
+            echo "What domain did you configure in Cloudflare?"
+            read -p "Domain (e.g., ai.example.com): " DOMAIN
+            echo ""
+            echo "In Cloudflare tunnel config, set Service to: http://gateway:8765"
         fi
         ;;
     3)
@@ -296,23 +303,31 @@ else
     echo "  URL:         http://localhost:8765"
 fi
 
+# -----------------------------------------------------------------------------
+# Deploy Now?
+# -----------------------------------------------------------------------------
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  NEXT STEPS"
+echo "  DEPLOY"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "  1. Run: ./deploy.sh"
-echo ""
-if [ "$USE_CLOUDFLARE" = "true" ]; then
-    echo "  2. Configure your Cloudflare Tunnel to point to:"
-    echo "     http://gateway:8765"
+read -p "Start the AI now? [Y/n]: " DEPLOY_NOW
+DEPLOY_NOW=${DEPLOY_NOW:-Y}
+
+if [[ "$DEPLOY_NOW" =~ ^[Yy]$ ]] || [ -z "$DEPLOY_NOW" ]; then
     echo ""
-    echo "  3. Access your AI at: https://$DOMAIN"
-elif [ -n "$DOMAIN" ] && [ -n "$SSL_EMAIL" ]; then
-    echo "  2. Run: ./setup_ssl.sh"
+    echo "Starting deployment..."
     echo ""
-    echo "  3. Access your AI at: https://$DOMAIN"
+    ./deploy.sh
 else
-    echo "  2. Access your AI at: http://localhost:8765"
+    echo ""
+    echo "To deploy later, run: ./deploy.sh"
+    echo ""
+    if [ "$USE_CLOUDFLARE" = "true" ]; then
+        echo "Remember to configure your Cloudflare Tunnel to point to:"
+        echo "  http://gateway:8765"
+    elif [ -n "$DOMAIN" ] && [ -n "$SSL_EMAIL" ]; then
+        echo "After deploying, run: ./setup_ssl.sh"
+    fi
+    echo ""
 fi
-echo ""

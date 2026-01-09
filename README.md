@@ -65,13 +65,29 @@ The interactive `setup.sh` script configures everything:
 
 ## Cloudflare Tunnel (Recommended)
 
-Secure access without opening firewall ports:
+Secure access without opening firewall ports - configured via `./setup.sh`:
+
+### Setup Steps
 
 1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
-2. Navigate to **Networks → Tunnels**
-3. Create a tunnel, copy the token
-4. Run `./setup.sh` and select Cloudflare Tunnel option
-5. Configure the tunnel to point to: `http://gateway:8765`
+2. Navigate to **Networks → Tunnels → Create a tunnel**
+3. Name your tunnel (e.g., "nora-ai")
+4. Copy the token (the long string)
+5. Run `./setup.sh` and select option **2) Cloudflare Tunnel**
+6. Paste your token when prompted
+7. In Cloudflare, configure:
+   - **Public hostname:** `ai.yourdomain.com`
+   - **Service:** `http://gateway:8765`
+
+### Manual Setup (Alternative)
+
+Just add to your `.env`:
+```bash
+USE_CLOUDFLARE=true
+CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiN2I2NDQ0...your-token-here
+```
+
+Then run: `sudo docker compose --profile tunnel up -d`
 
 **Benefits:**
 - 🔒 No open ports needed

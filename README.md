@@ -1,198 +1,146 @@
-# Nora AI - Self-Hosted AI Assistant
+# Nora AI
 
-A self-hosted AI assistant with web chat interface, conversation memory, and secure access via Cloudflare Tunnel.
+Self-hosted AI assistant with secure authentication, file management, and document processing.
 
-## Features
+## ✨ Features
 
-- 🤖 **Local AI** - Runs Ollama with llama2 (or any model)
-- 🌐 **Web Chat** - Browser-based chat interface
-- 💾 **Memory** - PostgreSQL-backed conversation history
-- 🔒 **Secure Access** - Cloudflare Tunnel (no open ports) or SSL
-- 🎨 **Customizable** - Company branding support
-- 📝 **Transcripts** - Export conversations to text
-- 🔑 **Multi-Provider** - Ollama (local) or Google Gemini (cloud)
+- 🔐 **Secure Login System** - JWT-based authentication
+- 📁 **File Management** - Upload, view, download, and delete files
+- 📄 **Document Processing** - Reads .docx, .pdf, .txt, .json, .xlsx, and more
+- 🤖 **AI Context** - AI uses all your files to answer questions
+- ☁️ **Cloudflare Tunnel** - Secure public access with IP detection
+- 🎨 **Modern Web UI** - Responsive design with dark theme
 
-## Quick Start
-
-### Prerequisites
-
-- Linux server (any distro: Debian, Ubuntu, Fedora, Arch, Gentoo, Alpine, etc.)
-- Docker and Docker Compose installed
-- 8GB+ RAM recommended
-
-### Deploy
+## 🚀 Quick Start
 
 ```bash
-# Clone or upload files to your server
-cd /path/to/nora-ai
-
-# Make scripts executable
-chmod +x *.sh
-
-# Run interactive setup wizard
+chmod +x setup.sh
 ./setup.sh
-
-# Deploy
-./deploy.sh
 ```
 
-Access the web UI at `http://your-server:8765`
+The setup will:
+1. Detect and display your public IP address
+2. Configure company name, AI model, and admin credentials
+3. Set up optional Cloudflare Tunnel
+4. Start all services automatically
 
-## Setup Wizard
+## 📁 File Structure
 
-The interactive `setup.sh` script configures everything:
+```
+├── setup.sh              # Setup & deploy script
+├── docker-compose.yml    # Container configuration
+├── .env                  # Your settings (auto-generated)
+├── company_info/         # Company files (AI reads these)
+│   ├── config.json       # Company name, assistant name
+│   ├── system_prompt.txt # Custom AI personality
+│   ├── about.txt         # Company description
+│   └── *.txt, *.md, ...  # Any documents
+├── uploads/              # User-uploaded files (via web UI)
+└── gateway/              # Web server
+```
 
-### 1. Company Information
-- Company name and assistant name
-- Custom greeting message
-- Brand colors
-- System prompt (AI personality)
+## 📄 Supported File Types
 
-### 2. AI Provider
-- **Ollama** - Local, free, private (default)
-- **Google Gemini** - Cloud-based, requires API key
-- **Both** - Gemini primary with Ollama fallback
+The AI can read content from:
 
-### 3. Database
-- PostgreSQL database name
-- Username and auto-generated secure password
-- All stored in `.env`
+| Type | Extensions |
+|------|------------|
+| Text | .txt, .md, .json, .csv, .xml, .yaml |
+| Documents | .docx, .pdf, .rtf |
+| Spreadsheets | .xlsx, .xls |
+| Code | .py, .js, .ts, .java, .cpp, .html, .css |
 
-### 4. Secure Access
-- **Local only** - http://localhost:8765
-- **Cloudflare Tunnel** - Secure public access, no open ports
-- **Custom Domain + SSL** - Let's Encrypt certificates
+## 🔐 Authentication
 
-## Cloudflare Tunnel (Recommended)
+Default credentials (can be changed during setup):
+- **Username:** `admin`
+- **Password:** *(auto-generated or your choice)*
 
-Secure access without opening firewall ports - configured via `./setup.sh`:
+Credentials are stored in `.env` file.
 
-### Setup Steps
+## ☁️ Cloudflare Tunnel
 
-1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
-2. Navigate to **Networks → Tunnels → Create a tunnel**
-3. Name your tunnel (e.g., "nora-ai")
-4. Copy the token (the long string)
-5. Run `./setup.sh` and select option **2) Cloudflare Tunnel**
-6. Paste your token when prompted
-7. In Cloudflare, configure:
-   - **Public hostname:** `ai.yourdomain.com`
+For secure public access without opening ports:
+
+1. Go to https://one.dash.cloudflare.com
+2. Zero Trust → Networks → Tunnels → Create
+3. Copy the tunnel token
+4. Run `./setup.sh` and paste when prompted
+5. In Cloudflare dashboard, configure:
    - **Service:** `http://gateway:8765`
+   - **Access Policy:** Add your email or IP restrictions
 
-### Manual Setup (Alternative)
+The setup script shows your public IP - useful for Cloudflare Access policies.
 
-Just add to your `.env`:
-```bash
-USE_CLOUDFLARE=true
-CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiN2I2NDQ0...your-token-here
-```
-
-Then run: `sudo docker compose --profile tunnel up -d`
-
-**Benefits:**
-- 🔒 No open ports needed
-- 🔐 Free automatic SSL
-- 🛡️ DDoS protection included
-- 🌐 Works behind NAT/firewalls
-
-## Configuration Files
-
-After running `setup.sh`:
-
-| File | Purpose |
-|------|---------|
-| `.env` | All environment variables |
-| `company_info/config.json` | Company branding |
-| `company_info/system_prompt.txt` | AI personality |
-
-### Manual Configuration
-
-Copy and edit `.env.example`:
+## 🛠️ Commands
 
 ```bash
-cp .env.example .env
-nano .env
-```
+# Stop all services
+docker compose down
 
-Key settings:
-- `AI_MODEL` - Ollama model (llama2, mistral, llama3)
-- `AI_PROVIDER` - auto, ollama, or gemini
-- `GEMINI_API_KEY` - Google Gemini API key
-- `USE_CLOUDFLARE` - Enable Cloudflare Tunnel
-- `CLOUDFLARE_TUNNEL_TOKEN` - Your tunnel token
+# Start services
+docker compose up -d
 
-## Directory Structure
+# Start with Cloudflare tunnel
+docker compose --profile tunnel up -d
 
-```
-├── setup.sh            # Interactive setup wizard
-├── deploy.sh           # Deployment script
-├── update.sh           # Update script
-├── setup_ssl.sh        # SSL certificate setup
-├── setup_git.sh        # Git repository setup
-├── docker-compose.yml  # Container orchestration
-├── .env.example        # Environment template
-├── gateway/            # API server
-│   ├── server_enhanced.py
-│   ├── database.py
-│   ├── ai_providers.py
-│   ├── transcript.py
-│   ├── static/
-│   ├── Dockerfile
-│   └── requirements.txt
-├── company_info/       # Your branding
-│   ├── config.json
-│   └── system_prompt.txt
-└── nginx/              # Reverse proxy (SSL)
-```
-
-## Services
-
-| Service | Port | Description |
-|---------|------|-------------|
-| Gateway | 8765 | API + Web UI |
-| Ollama | 11434 | LLM server |
-| Postgres | 5433 | Database |
-| Redis | 6380 | Cache |
-| Cloudflared | - | Tunnel (optional) |
-| Nginx | 443 | SSL proxy (optional) |
-
-## Commands
-
-```bash
 # View logs
 docker compose logs -f
 
-# Restart services
+# View tunnel logs
+docker logs nora_cloudflared -f
+
+# Restart
 docker compose restart
 
-# Stop everything
-docker compose down
-
-# Pull different AI model
-docker exec nora_ollama ollama pull mistral
-
-# Update to latest version
-./update.sh
+# Rebuild after code changes
+docker compose build --no-cache gateway
+docker compose up -d
 ```
 
-## Updating
+## 🌐 Access
 
-```bash
-./update.sh
+| Location | URL |
+|----------|-----|
+| Local | http://localhost:8765 |
+| LAN | http://YOUR_IP:8765 |
+| Public | Your Cloudflare tunnel URL |
+
+## ⚙️ Environment Variables
+
+The `.env` file contains:
+
+```env
+# AI Configuration
+AI_MODEL=llama2
+AI_PROVIDER=ollama
+
+# Security
+SECRET_KEY=your_secret_key
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your_password
+
+# Cloudflare (optional)
+USE_CLOUDFLARE=true
+CLOUDFLARE_TUNNEL_TOKEN=your_token
 ```
 
-This preserves your `.env` and `company_info/` settings.
+## 📋 API Endpoints
 
-## Supported Distros
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth/login` | POST | Login and get JWT token |
+| `/auth/verify` | GET | Verify token validity |
+| `/chat` | POST | Chat with AI (auth required) |
+| `/files/list` | GET | List files |
+| `/files/upload` | POST | Upload file |
+| `/files/download/{dir}/{file}` | GET | Download file |
+| `/files/view/{dir}/{file}` | GET | View file content |
+| `/files/delete/{dir}/{file}` | DELETE | Delete file |
+| `/files/stats` | GET | Get file statistics |
 
-Scripts are distro-neutral and work on:
-- Debian / Ubuntu
-- Fedora / CentOS / RHEL
-- Arch Linux
-- Gentoo
-- Alpine Linux
-- Any Linux with Docker
+## 📦 Requirements
 
-## License
-
-MIT
+- Linux server with Docker
+- 8GB+ RAM (for local AI with Ollama)
+- Docker Compose

@@ -2,31 +2,33 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
+# Install system dependencies for document processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxml2-dev \
+    libxslt-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    fastapi==0.104.1 \
+    uvicorn==0.24.0 \
+    httpx==0.25.2 \
+    websockets==12.0 \
+    PyJWT==2.8.0 \
+    python-multipart==0.0.6 \
+    python-docx==1.1.0 \
+    PyPDF2==3.0.1 \
+    striprtf==0.0.26 \
+    pandas==2.1.3 \
+    openpyxl==3.1.2 \
+    xlrd==2.0.1
 
-# Copy application code
-COPY . .
+COPY server.py .
+COPY static/ ./static/
 
-# Use enhanced server with memory support
-RUN if [ -f "server_enhanced.py" ]; then cp server_enhanced.py server.py; fi
+# Create uploads directory
+RUN mkdir -p /app/uploads
 
-# Create static directory
-RUN mkdir -p static
-
-# Expose port
 EXPOSE 8765
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8765/health')" || exit 1
-
-# Run the server
-CMD ["python", "server.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"]

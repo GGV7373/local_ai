@@ -212,7 +212,11 @@ Be helpful, friendly, and concise. If asked about files or documents, refer to t
 async def query_gemini(message: str, context: str, model: str = None, language: str = "en") -> str:
     """Query Google Gemini."""
     config = get_config()
-    use_model = model or AI_MODEL or "gemini-1.5-flash"
+    use_model = model or GEMINI_MODEL or "gemini-2.0-flash"
+    
+    # Ensure we're using a valid Gemini model, not an Ollama model
+    if not use_model.startswith("gemini"):
+        use_model = "gemini-2.0-flash"
     
     # Add language instruction
     lang_instruction = ""
@@ -232,7 +236,7 @@ Be helpful, friendly, and concise."""
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"https://generativelanguage.googleapis.com/v1/models/{use_model}:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{use_model}:generateContent?key={GEMINI_API_KEY}",
             json={"contents": [{"parts": [{"text": prompt}]}]}
         )
         response.raise_for_status()

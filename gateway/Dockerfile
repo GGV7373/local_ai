@@ -23,8 +23,16 @@ RUN pip install --no-cache-dir \
     openpyxl==3.1.2 \
     xlrd==2.0.1 \
     bcrypt==4.1.1 \
-    asyncio==3.0.3
+    ollama>=0.4.0 \
+    aiohttp>=3.9.0
 
+# Copy all Python modules
+COPY config.py .
+COPY auth.py .
+COPY models.py .
+COPY documents.py .
+COPY ai_providers.py .
+COPY ollama_setup.py .
 COPY server.py .
 COPY static/ ./static/
 

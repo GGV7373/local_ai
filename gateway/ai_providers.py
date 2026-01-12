@@ -1,15 +1,32 @@
 """
 Nora AI - AI Provider Module (Ollama & Gemini)
+Uses the official ollama Python library for better reliability.
 """
 import os
 import logging
 import asyncio
 import aiohttp
-from typing import Optional, Tuple
+from typing import Tuple
+
+try:
+    from ollama import AsyncClient as OllamaAsyncClient
+    from ollama import ResponseError as OllamaResponseError
+    OLLAMA_LIB_AVAILABLE = True
+except ImportError:
+    OLLAMA_LIB_AVAILABLE = False
+    OllamaAsyncClient = None
+    OllamaResponseError = Exception
 
 from config import AI_SERVER_URL, AI_MODEL, GEMINI_API_KEY
 
 logger = logging.getLogger(__name__)
+
+
+def get_ollama_client():
+    """Get an Ollama AsyncClient configured with the correct host."""
+    if not OLLAMA_LIB_AVAILABLE:
+        return None
+    return OllamaAsyncClient(host=AI_SERVER_URL)
 
 
 async def ask_ollama(
@@ -20,7 +37,7 @@ async def ask_ollama(
     max_retries: int = 3
 ) -> Tuple[bool, str]:
     """
-    Send a question to Ollama and get a response.
+    Send a question to Ollama using the official library.
     Returns (success, response_or_error).
     """
     language_instructions = {
@@ -39,6 +56,49 @@ async def ask_ollama(
         {"role": "user", "content": prompt}
     ]
     
+    # Use official ollama library if available
+    if OLLAMA_LIB_AVAILABLE:
+        for attempt in range(max_retries):
+            try:
+                client = get_ollama_client()
+                response = await client.chat(
+                    model=AI_MODEL,
+                    messages=messages
+                )
+                content = response.message.content
+                return True, content
+                
+            except OllamaResponseError as e:
+                logger.error(f"Ollama response error: {e}")
+                if e.status_code == 404:
+                    return False, f"Model '{AI_MODEL}' not found. Run: ollama pull {AI_MODEL}"
+                return False, str(e)
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"Ollama error (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    # Provide helpful error message
+                    if "connect" in error_msg.lower() or "connection" in error_msg.lower():
+                        return False, (
+                            "Failed to connect to Ollama. Please check that:\n"
+                            "1. Ollama is installed (https://ollama.com/download)\n"
+                            "2. Ollama is running (run 'ollama serve' in terminal)\n"
+                            f"3. Ollama is accessible at: {AI_SERVER_URL}"
+                        )
+                    return False, error_msg
+        
+        return False, "Failed to connect to Ollama after multiple attempts"
+    
+    # Fallback to aiohttp if ollama library not available
+    return await _ask_ollama_http(messages, max_retries)
+
+
+async def _ask_ollama_http(messages: list, max_retries: int = 3) -> Tuple[bool, str]:
+    """Fallback HTTP method if ollama library is not available."""
     for attempt in range(max_retries):
         try:
             timeout = aiohttp.ClientTimeout(total=120)
@@ -56,35 +116,42 @@ async def ask_ollama(
                         return True, data.get("message", {}).get("content", "No response")
                     else:
                         error_text = await response.text()
-                        logger.error(f"Ollama error {response.status}: {error_text}")
+                        logger.error(f"Ollama HTTP error {response.status}: {error_text}")
+                        if response.status == 404:
+                            return False, f"Model '{AI_MODEL}' not found. Run: ollama pull {AI_MODEL}"
                         
         except asyncio.TimeoutError:
             logger.warning(f"Ollama timeout (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
         except aiohttp.ClientError as e:
             logger.warning(f"Ollama connection error (attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
         except Exception as e:
             logger.error(f"Unexpected Ollama error: {e}")
             return False, str(e)
+        
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2 ** attempt)
     
-    return False, "Failed to connect to Ollama after multiple attempts"
+    return False, (
+        "Failed to connect to Ollama. Please check that:\n"
+        "1. Ollama is installed (https://ollama.com/download)\n"
+        "2. Ollama is running (run 'ollama serve' in terminal)\n"
+        f"3. Ollama is accessible at: {AI_SERVER_URL}"
+    )
 
 
 async def ask_gemini(
     prompt: str,
     context: str = "",
     system_prompt: str = "",
-    language: str = "en"
+    language: str = "en",
+    model: str = None
 ) -> Tuple[bool, str]:
     """
     Send a question to Google Gemini API.
     Returns (success, response_or_error).
     """
-    if not GEMINI_API_KEY:
-        return False, "Gemini API key not configured"
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
+        return False, "Gemini API key not configured. Set GEMINI_API_KEY in your .env file."
     
     language_instructions = {
         "no": "Svar alltid på norsk.",
@@ -98,11 +165,18 @@ async def ask_gemini(
         full_prompt += f"\n\nContext:\n{context}"
     full_prompt += f"\n\nUser: {prompt}"
     
+    # Use provided model or default from config
+    use_model = model or AI_MODEL or "gemini-1.5-flash"
+    
+    # Ensure we use a valid Gemini model name
+    if not use_model.startswith("gemini"):
+        use_model = "gemini-1.5-flash"
+    
     try:
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{use_model}:generateContent?key={GEMINI_API_KEY}",
                 json={
                     "contents": [{"parts": [{"text": full_prompt}]}],
                     "safetySettings": [
@@ -120,12 +194,21 @@ async def ask_gemini(
                         text = data["candidates"][0]["content"]["parts"][0]["text"]
                         return True, text
                     except (KeyError, IndexError):
+                        logger.error(f"Invalid Gemini response: {data}")
                         return False, "Invalid response format from Gemini"
                 else:
                     error = await response.text()
                     logger.error(f"Gemini API error {response.status}: {error}")
+                    
+                    if response.status == 400 and "API_KEY" in error:
+                        return False, "Invalid Gemini API key. Check your GEMINI_API_KEY."
+                    elif response.status == 404:
+                        return False, f"Gemini model '{use_model}' not found. Try gemini-1.5-flash."
+                    
                     return False, f"Gemini API error: {response.status}"
                     
+    except asyncio.TimeoutError:
+        return False, "Gemini request timed out"
     except Exception as e:
         logger.error(f"Gemini error: {e}")
         return False, str(e)
@@ -143,41 +226,50 @@ async def ask_ai(
     Ask AI using specified provider with optional fallback.
     Returns (response, provider_used).
     """
-    providers = {
-        "ollama": ask_ollama,
-        "gemini": ask_gemini
-    }
+    result = ""
     
     # Try primary provider
-    primary_func = providers.get(provider)
-    if primary_func:
-        if provider == "ollama":
-            success, result = await ask_ollama(prompt, context, system_prompt, language)
-        else:
-            success, result = await ask_gemini(prompt, context, system_prompt, language)
-        
+    if provider == "gemini":
+        success, result = await ask_gemini(prompt, context, system_prompt, language)
         if success:
-            return result, provider
+            return result, "gemini"
+    else:
+        success, result = await ask_ollama(prompt, context, system_prompt, language)
+        if success:
+            return result, "ollama"
     
     # Try fallback if enabled
     if fallback:
         fallback_provider = "gemini" if provider == "ollama" else "ollama"
-        fallback_func = providers.get(fallback_provider)
+        logger.warning(f"{provider} failed, trying fallback: {fallback_provider}")
         
-        if fallback_func:
-            if fallback_provider == "ollama":
-                success, result = await ask_ollama(prompt, context, system_prompt, language)
-            else:
-                success, result = await ask_gemini(prompt, context, system_prompt, language)
-            
-            if success:
-                return result, fallback_provider
+        if fallback_provider == "gemini":
+            success, fallback_result = await ask_gemini(prompt, context, system_prompt, language)
+        else:
+            success, fallback_result = await ask_ollama(prompt, context, system_prompt, language)
+        
+        if success:
+            return fallback_result + f"\n\n*(Using {fallback_provider} as fallback)*", fallback_provider
     
     return f"Error: {result}", provider
 
 
 async def check_ollama_status() -> dict:
     """Check if Ollama is running and accessible."""
+    if OLLAMA_LIB_AVAILABLE:
+        try:
+            client = get_ollama_client()
+            models = await client.list()
+            model_names = [m.model for m in models.models] if hasattr(models, 'models') else []
+            return {
+                "status": "connected",
+                "models": model_names,
+                "url": AI_SERVER_URL
+            }
+        except Exception as e:
+            return {"status": "disconnected", "message": str(e)}
+    
+    # Fallback to HTTP check
     try:
         timeout = aiohttp.ClientTimeout(total=5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -197,6 +289,16 @@ async def check_ollama_status() -> dict:
 
 async def list_ollama_models() -> list:
     """List available models in Ollama."""
+    if OLLAMA_LIB_AVAILABLE:
+        try:
+            client = get_ollama_client()
+            models = await client.list()
+            return [{"name": m.model} for m in models.models] if hasattr(models, 'models') else []
+        except Exception as e:
+            logger.error(f"Error listing models: {e}")
+            return []
+    
+    # Fallback to HTTP
     try:
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:

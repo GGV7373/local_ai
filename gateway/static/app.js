@@ -98,7 +98,7 @@ function getLanguageCode() {
 
 function toggleVoiceInput() {
     if (!SpeechRecognitionAPI) {
-        showToast('Speech recognition not supported in your browser', 'error');
+        showToast('Speech recognition not supported in your browser. Use Chrome, Edge, Safari, or Firefox.', 'error');
         return;
     }
 
@@ -121,7 +121,22 @@ function toggleVoiceInput() {
         chatInput.focus();
 
         speechRecognition.lang = getLanguageCode();
-        speechRecognition.start();
+        
+        try {
+            speechRecognition.start();
+        } catch (e) {
+            // In case recognition is already running
+            console.warn('Speech recognition already started:', e);
+            speechRecognition.abort();
+            setTimeout(() => {
+                try {
+                    speechRecognition.start();
+                } catch (e2) {
+                    showToast('Failed to start speech recognition. Try refreshing the page.', 'error');
+                    stopVoiceInput();
+                }
+            }, 100);
+        }
     }
 }
 
@@ -133,6 +148,7 @@ function initializeSpeechRecognition() {
         const voiceStatus = document.getElementById('voiceStatus');
         voiceBtn.classList.add('active');
         voiceStatus.style.display = 'flex';
+        console.log('Speech recognition started with language:', speechRecognition.lang);
     };
 
     speechRecognition.onresult = (event) => {
@@ -143,6 +159,7 @@ function initializeSpeechRecognition() {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
                 chatInput.value += transcript + ' ';
+                console.log('Final transcript:', transcript);
             } else {
                 interimTranscript += transcript;
             }
@@ -155,11 +172,25 @@ function initializeSpeechRecognition() {
     };
 
     speechRecognition.onerror = (event) => {
-        const errorMessage = {
-            'no-speech': 'No speech detected. Please try again.',
-            'audio-capture': 'No microphone found. Check permissions.',
-            'network': 'Network error. Check your connection.',
-        }[event.error] || `Error: ${event.error}`;
+        const errorMessages = {
+            'no-speech': '🔇 No speech detected. Please try again.',
+            'audio-capture': '🎤 Microphone not found. Check permissions.',
+            'network': '🌐 Network error. Check your internet connection and try again.',
+            'not-allowed': '❌ Microphone access denied. Enable in browser settings.',
+            'service-not-allowed': '❌ Speech recognition service not available.',
+            'bad-grammar': '⚠️ Grammar error in recognition request.',
+            'aborted': 'ℹ️ Speech recognition was stopped.',
+        };
+        
+        const errorMessage = errorMessages[event.error] || `❌ Error: ${event.error}`;
+        
+        console.error(`Speech Recognition Error: ${event.error}`, event);
+        
+        // For network errors, provide additional help
+        if (event.error === 'network') {
+            console.warn('Network error - checking browser console may show more details');
+            console.warn('Try: F12 → Console tab → Refresh page → Try voice again');
+        }
         
         showToast(errorMessage, 'error');
         stopVoiceInput();

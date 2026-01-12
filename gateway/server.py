@@ -1,41 +1,56 @@
 """
-Nora AI - Advanced Gateway Server
-With Authentication, File Management, and Document Processing
+Nora AI - Gateway Server (Main Application)
+Modular FastAPI application with authentication, AI chat, and file management.
 """
 import os
 import json
-import hashlib
-import secrets
-import httpx
 import mimetypes
 import logging
 import asyncio
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from functools import wraps, lru_cache
-from collections import defaultdict
-import time
+from datetime import datetime
+from typing import List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, File, UploadFile, Form, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import jwt
+import httpx
 
-# Try to import bcrypt for better password hashing
-try:
-    import bcrypt
-    BCRYPT_AVAILABLE = True
-except ImportError:
-    BCRYPT_AVAILABLE = False
+# Import configuration
+from config import (
+    AI_SERVER_URL, AI_MODEL, AI_PROVIDER, GEMINI_API_KEY,
+    COMPANY_INFO_DIR, UPLOADS_DIR, ALLOWED_EXTENSIONS, STATIC_DIR
+)
+
+# Import authentication
+from auth import (
+    create_token, verify_token, verify_password, 
+    check_rate_limit, record_login_attempt, get_current_user
+)
+
+# Import models
+from models import LoginRequest, ChatRequest, FileInfo
+
+# Import document processing
+from documents import extract_text_from_file, load_company_context, get_config
+
+# Import AI providers
+from ai_providers import ask_ollama, ask_gemini, check_ollama_status
+
+# Import Ollama setup
+from ollama_setup import (
+    get_system_info, check_ollama_connection, install_ollama_linux,
+    start_ollama_service, pull_ollama_model, list_ollama_models
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Application Setup
+# =============================================================================
 app = FastAPI(title="Nora AI", docs_url="/api/docs", redoc_url="/api/redoc")
 
 # CORS middleware for API access
@@ -47,179 +62,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =============================================================================
-# Configuration
-# =============================================================================
-AI_SERVER_URL = os.getenv("AI_SERVER_URL", "http://ollama:11434")
-AI_MODEL = os.getenv("AI_MODEL", "llama2")
-AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# Security
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
-TOKEN_EXPIRE_HOURS = 24
-
-# Paths
-COMPANY_INFO_DIR = Path("/app/company_info")
-UPLOADS_DIR = Path("/app/uploads")
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
-# Allowed file extensions for upload
-ALLOWED_EXTENSIONS = {
-    '.txt', '.md', '.json', '.csv', '.xml', '.yaml', '.yml',
-    '.doc', '.docx', '.pdf', '.rtf',
-    '.xls', '.xlsx',
-    '.html', '.htm',
-    '.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.css'
-}
-
-# Security
-security = HTTPBearer(auto_error=False)
-
-# Rate limiting storage
-login_attempts: Dict[str, List[float]] = defaultdict(list)
-RATE_LIMIT_WINDOW = 300  # 5 minutes
-MAX_LOGIN_ATTEMPTS = 5
-
 # Context cache
-_context_cache: Dict[str, Any] = {"content": None, "timestamp": 0}
-CONTEXT_CACHE_TTL = 60  # Cache context for 60 seconds
+_context_cache = {"content": None, "timestamp": 0}
+CONTEXT_CACHE_TTL = 60
+
 
 # =============================================================================
-# Authentication
+# Document Context Loading
 # =============================================================================
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt if available, otherwise SHA-256."""
-    if BCRYPT_AVAILABLE:
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def verify_password(password: str, stored: str) -> bool:
-    """Verify a password against stored hash."""
-    # For plain text comparison (from env vars)
-    if password == stored:
-        return True
-    # For bcrypt hashed passwords
-    if BCRYPT_AVAILABLE and stored.startswith('$2'):
-        try:
-            return bcrypt.checkpw(password.encode(), stored.encode())
-        except:
-            pass
-    # Fallback to SHA-256 comparison
-    return hashlib.sha256(password.encode()).hexdigest() == stored
-
-def check_rate_limit(ip: str) -> bool:
-    """Check if IP is rate limited. Returns True if allowed."""
-    now = time.time()
-    # Clean old attempts
-    login_attempts[ip] = [t for t in login_attempts[ip] if now - t < RATE_LIMIT_WINDOW]
-    return len(login_attempts[ip]) < MAX_LOGIN_ATTEMPTS
-
-def record_login_attempt(ip: str):
-    """Record a failed login attempt."""
-    login_attempts[ip].append(time.time())
-
-def create_token(username: str) -> str:
-    """Create a JWT token."""
-    expire = datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS)
-    payload = {
-        "sub": username,
-        "exp": expire,
-        "iat": datetime.utcnow()
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-
-def verify_token(token: str) -> Optional[str]:
-    """Verify a JWT token and return the username."""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return payload.get("sub")
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Get the current authenticated user."""
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    username = verify_token(credentials.credentials)
-    if not username:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
-    return username
-
-# =============================================================================
-# Document Processing
-# =============================================================================
-def extract_text_from_file(file_path: Path) -> str:
-    """Extract text content from various file types."""
-    suffix = file_path.suffix.lower()
-    
-    try:
-        # Plain text files
-        if suffix in {'.txt', '.md', '.json', '.csv', '.xml', '.yaml', '.yml', 
-                      '.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.css', '.html', '.htm'}:
-            return file_path.read_text(encoding='utf-8', errors='ignore')
-        
-        # Word documents
-        elif suffix == '.docx':
-            try:
-                from docx import Document
-                doc = Document(str(file_path))
-                return '\n'.join([para.text for para in doc.paragraphs])
-            except ImportError:
-                return f"[DOCX file - install python-docx to read: {file_path.name}]"
-            except Exception as e:
-                return f"[Error reading DOCX: {str(e)}]"
-        
-        # PDF files
-        elif suffix == '.pdf':
-            try:
-                import PyPDF2
-                with open(file_path, 'rb') as f:
-                    reader = PyPDF2.PdfReader(f)
-                    text = []
-                    for page in reader.pages:
-                        text.append(page.extract_text() or '')
-                    return '\n'.join(text)
-            except ImportError:
-                return f"[PDF file - install PyPDF2 to read: {file_path.name}]"
-            except Exception as e:
-                return f"[Error reading PDF: {str(e)}]"
-        
-        # RTF files
-        elif suffix == '.rtf':
-            try:
-                from striprtf.striprtf import rtf_to_text
-                return rtf_to_text(file_path.read_text(encoding='utf-8', errors='ignore'))
-            except ImportError:
-                return f"[RTF file - install striprtf to read: {file_path.name}]"
-            except Exception as e:
-                return f"[Error reading RTF: {str(e)}]"
-        
-        # Excel files
-        elif suffix in {'.xls', '.xlsx'}:
-            try:
-                import pandas as pd
-                df = pd.read_excel(str(file_path))
-                return df.to_string()
-            except ImportError:
-                return f"[Excel file - install pandas openpyxl to read: {file_path.name}]"
-            except Exception as e:
-                return f"[Error reading Excel: {str(e)}]"
-        
-        else:
-            return f"[Unsupported file type: {suffix}]"
-            
-    except Exception as e:
-        return f"[Error reading file {file_path.name}: {str(e)}]"
-
-def load_company_context(force_refresh: bool = False) -> str:
+def load_document_context(force_refresh: bool = False) -> str:
     """Load all text files from company_info folder as context. Uses caching."""
+    import time
     global _context_cache
     
     now = time.time()
@@ -267,20 +120,11 @@ def load_company_context(force_refresh: bool = False) -> str:
     logger.info(f"Context loaded: {len(result)} characters from {len(context_parts)} sources")
     return result
 
-def get_config() -> dict:
-    """Load company config."""
-    config_file = COMPANY_INFO_DIR / "config.json"
-    if config_file.exists():
-        try:
-            return json.loads(config_file.read_text())
-        except:
-            pass
-    return {"company_name": "My Company", "assistant_name": "Nora"}
 
 # =============================================================================
-# AI Providers
+# AI Query Functions
 # =============================================================================
-async def ask_ollama(message: str, context: str, model: str = None, language: str = "en") -> str:
+async def query_ollama(message: str, context: str, model: str = None, language: str = "en") -> str:
     """Query Ollama with retry logic and better error handling."""
     config = get_config()
     
@@ -340,7 +184,7 @@ Be helpful, friendly, and concise. If asked about files or documents, refer to t
                 )
                 response.raise_for_status()
                 return response.json()["message"]["content"]
-        except httpx.ConnectError as e:
+        except httpx.ConnectError:
             last_error = ConnectionError(
                 "Failed to connect to Ollama. Please check that:\n"
                 "1. Ollama is installed (https://ollama.com/download)\n"
@@ -352,15 +196,18 @@ Be helpful, friendly, and concise. If asked about files or documents, refer to t
                 last_error = ValueError(f"Model '{use_model}' not found. Please run: ollama pull {use_model}")
             else:
                 last_error = e
+        except ConnectionError as e:
+            last_error = e
         except Exception as e:
             last_error = e
         
         if attempt < max_retries - 1:
-            await asyncio.sleep(1)  # Wait before retry
+            await asyncio.sleep(1)
     
     raise last_error or Exception("Failed to connect to Ollama after multiple attempts")
 
-async def ask_gemini(message: str, context: str, model: str = None, language: str = "en") -> str:
+
+async def query_gemini(message: str, context: str, model: str = None, language: str = "en") -> str:
     """Query Google Gemini."""
     config = get_config()
     use_model = model or AI_MODEL or "gemini-1.5-flash"
@@ -390,52 +237,34 @@ Be helpful, friendly, and concise."""
         data = response.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
+
 async def ask_ai(message: str, provider: str = None, model: str = None, language: str = "en") -> str:
     """Query the AI with company context. Supports dynamic provider switching."""
-    context = load_company_context()
+    context = load_document_context()
     
     # Use specified provider or fall back to default
     use_provider = provider or AI_PROVIDER
     
     try:
         if use_provider == "gemini" and GEMINI_API_KEY:
-            return await ask_gemini(message, context, model, language)
+            return await query_gemini(message, context, model, language)
         else:
-            return await ask_ollama(message, context, model, language)
+            return await query_ollama(message, context, model, language)
     except ConnectionError as e:
         # Try to fall back to Gemini if Ollama fails and Gemini is available
         if use_provider == "ollama" and GEMINI_API_KEY:
             logger.warning("Ollama unavailable, falling back to Gemini")
-            return await ask_gemini(message, context, model, language) + "\n\n*(Note: Using Gemini as Ollama is currently unavailable)*"
+            return await query_gemini(message, context, model, language) + "\n\n*(Note: Using Gemini as Ollama is currently unavailable)*"
         raise
 
-# =============================================================================
-# Models
-# =============================================================================
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-class ChatRequest(BaseModel):
-    message: str
-    provider: Optional[str] = None  # Optional: "ollama" or "gemini"
-    model: Optional[str] = None  # Optional: override model
-    language: Optional[str] = "en"  # Optional: "en" for English, "no" for Norwegian
-
-class FileInfo(BaseModel):
-    name: str
-    path: str
-    size: int
-    modified: str
-    type: str
-    readable: bool
 
 # =============================================================================
 # Public Routes (No Auth Required)
 # =============================================================================
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return FileResponse("/app/static/index.html")
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
 
 @app.get("/health")
 async def health():
@@ -459,9 +288,11 @@ async def health():
         "ollama_status": ollama_status
     }
 
+
 @app.get("/config")
-async def config():
+async def config_endpoint():
     return get_config()
+
 
 @app.get("/providers")
 async def get_providers():
@@ -504,9 +335,12 @@ async def get_providers():
         "default_model": AI_MODEL
     }
 
+
 @app.post("/auth/login")
 async def login(request: LoginRequest, req: Request):
     """Authenticate user and return JWT token."""
+    from config import ADMIN_USERNAME, ADMIN_PASSWORD, TOKEN_EXPIRE_HOURS
+    
     client_ip = req.client.host if req.client else "unknown"
     
     # Check rate limiting
@@ -532,10 +366,12 @@ async def login(request: LoginRequest, req: Request):
     logger.warning(f"Failed login attempt for user: {request.username} from IP: {client_ip}")
     raise HTTPException(status_code=401, detail="Invalid username or password")
 
+
 @app.get("/auth/verify")
 async def verify_auth(user: str = Depends(get_current_user)):
     """Verify if the current token is valid."""
     return {"valid": True, "username": user}
+
 
 # =============================================================================
 # Protected Routes (Auth Required)
@@ -544,11 +380,11 @@ async def verify_auth(user: str = Depends(get_current_user)):
 async def chat(request: ChatRequest, user: str = Depends(get_current_user)):
     """Chat with the AI (requires authentication). Supports provider switching."""
     try:
-        response = await ask_ai(request.message, request.provider, request.model, request.language)
+        response = await ask_ai(request.message, request.provider, None, request.language)
         return {
             "response": response,
             "provider": request.provider or AI_PROVIDER,
-            "model": request.model or AI_MODEL,
+            "model": AI_MODEL,
             "success": True
         }
     except ConnectionError as e:
@@ -568,12 +404,12 @@ async def chat(request: ChatRequest, user: str = Depends(get_current_user)):
         logger.error(f"Chat error: {e}")
         return {"response": f"Sorry, I encountered an error: {str(e)}", "success": False}
 
+
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):
     """WebSocket chat endpoint."""
     await websocket.accept()
     
-    # First message should be the auth token
     try:
         auth_msg = await websocket.receive_text()
         auth_data = json.loads(auth_msg)
@@ -595,8 +431,9 @@ async def websocket_chat(websocket: WebSocket):
                 await websocket.send_text(f"Sorry, I encountered an error: {str(e)}")
     except WebSocketDisconnect:
         pass
-    except Exception as e:
+    except Exception:
         pass
+
 
 # =============================================================================
 # File Management Routes
@@ -626,11 +463,11 @@ async def list_files(
                 path=str(rel_path),
                 size=file_path.stat().st_size,
                 modified=datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                type=suffix[1:] if suffix else "unknown",
-                readable=suffix in ALLOWED_EXTENSIONS
+                type=suffix[1:] if suffix else "unknown"
             ))
     
     return files
+
 
 @app.post("/files/upload")
 async def upload_file(
@@ -676,6 +513,7 @@ async def upload_file(
         "path": str(file_path.relative_to(base_dir))
     }
 
+
 @app.get("/files/download/{directory}/{filename:path}")
 async def download_file(
     directory: str,
@@ -704,6 +542,7 @@ async def download_file(
         filename=file_path.name,
         media_type=mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     )
+
 
 @app.get("/files/view/{directory}/{filename:path}")
 async def view_file(
@@ -737,6 +576,7 @@ async def view_file(
         "type": file_path.suffix[1:] if file_path.suffix else "unknown"
     }
 
+
 @app.delete("/files/delete/{directory}/{filename:path}")
 async def delete_file(
     directory: str,
@@ -768,6 +608,7 @@ async def delete_file(
     
     return {"success": True, "deleted": filename}
 
+
 @app.get("/files/stats")
 async def file_stats(user: str = Depends(get_current_user)):
     """Get statistics about files available to the AI."""
@@ -793,197 +634,59 @@ async def file_stats(user: str = Depends(get_current_user)):
                         stats["ai_readable_files"] += 1
     
     # Calculate context size
-    context = load_company_context()
+    context = load_document_context()
     stats["total_context_chars"] = len(context)
     
     return stats
 
+
 # =============================================================================
 # Ollama Setup & Installation Routes
 # =============================================================================
-import platform
-import subprocess
-import shutil
-
 @app.get("/system/info")
 async def system_info():
     """Get system information for setup guidance."""
-    system = platform.system().lower()
-    is_linux = system == "linux"
-    is_mac = system == "darwin"
-    is_windows = system == "windows"
-    
-    # Check if we're in Docker
-    in_docker = os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
-    
-    # Check if Ollama is installed locally
-    ollama_installed = shutil.which("ollama") is not None
-    
-    # Check Ollama connection
-    ollama_running = False
-    ollama_models = []
-    try:
-        import httpx
-        with httpx.Client(timeout=5.0) as client:
-            res = client.get(f"{AI_SERVER_URL}/api/tags")
-            if res.status_code == 200:
-                ollama_running = True
-                ollama_models = [m["name"] for m in res.json().get("models", [])]
-    except:
-        pass
-    
-    return {
-        "system": system,
-        "is_linux": is_linux,
-        "is_mac": is_mac,
-        "is_windows": is_windows,
-        "in_docker": in_docker,
-        "ollama_installed": ollama_installed,
-        "ollama_running": ollama_running,
-        "ollama_models": ollama_models,
-        "can_auto_install": is_linux and not in_docker,
-        "ai_server_url": AI_SERVER_URL
-    }
+    info = get_system_info()
+    running, models = await check_ollama_connection()
+    info["ollama_running"] = running
+    info["ollama_models"] = models
+    return info
+
 
 @app.post("/ollama/install")
-async def install_ollama(user: str = Depends(get_current_user)):
-    """Install Ollama on Linux systems. Only works on native Linux (not Docker)."""
-    system = platform.system().lower()
-    in_docker = os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
-    
-    if in_docker:
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot install Ollama from inside Docker. Please install on the host machine."
-        )
-    
-    if system != "linux":
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Auto-install only supported on Linux. Your system: {system}"
-        )
-    
-    # Check if already installed
-    if shutil.which("ollama"):
-        return {"success": True, "message": "Ollama is already installed", "already_installed": True}
-    
-    try:
-        logger.info("Starting Ollama installation...")
-        
-        # Download and run install script
-        result = subprocess.run(
-            ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minute timeout
-        )
-        
-        if result.returncode != 0:
-            logger.error(f"Installation failed: {result.stderr}")
-            raise HTTPException(status_code=500, detail=f"Installation failed: {result.stderr}")
-        
-        logger.info("Ollama installed successfully")
-        return {
-            "success": True, 
-            "message": "Ollama installed successfully!",
-            "output": result.stdout[-500:] if result.stdout else ""
-        }
-        
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Installation timed out")
-    except Exception as e:
-        logger.error(f"Installation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+async def install_ollama_route(user: str = Depends(get_current_user)):
+    """Install Ollama on Linux systems."""
+    return install_ollama_linux()
+
 
 @app.post("/ollama/start")
-async def start_ollama(user: str = Depends(get_current_user)):
+async def start_ollama_route(user: str = Depends(get_current_user)):
     """Start Ollama service on Linux."""
-    system = platform.system().lower()
-    in_docker = os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
-    
-    if in_docker:
-        raise HTTPException(status_code=400, detail="Cannot start Ollama from inside Docker")
-    
-    if not shutil.which("ollama"):
-        raise HTTPException(status_code=400, detail="Ollama is not installed")
-    
-    try:
-        # Start ollama serve in background
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        
-        # Wait a bit for it to start
-        await asyncio.sleep(2)
-        
-        # Check if it's running
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                res = await client.get(f"{AI_SERVER_URL}/api/tags")
-                if res.status_code == 200:
-                    return {"success": True, "message": "Ollama started successfully"}
-        except:
-            pass
-        
-        return {"success": True, "message": "Ollama start command sent. It may take a moment to be ready."}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await start_ollama_service()
+
 
 @app.post("/ollama/pull/{model}")
-async def pull_model(model: str, user: str = Depends(get_current_user)):
+async def pull_model_route(model: str, user: str = Depends(get_current_user)):
     """Pull an Ollama model."""
-    # Check if Ollama is accessible
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            res = await client.get(f"{AI_SERVER_URL}/api/tags")
-            if res.status_code != 200:
-                raise HTTPException(status_code=503, detail="Ollama is not running")
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to Ollama")
-    
-    try:
-        logger.info(f"Pulling model: {model}")
-        
-        # Use Ollama API to pull model
-        async with httpx.AsyncClient(timeout=600.0) as client:  # 10 min timeout for large models
-            response = await client.post(
-                f"{AI_SERVER_URL}/api/pull",
-                json={"name": model, "stream": False}
-            )
-            
-            if response.status_code == 200:
-                return {"success": True, "message": f"Model '{model}' pulled successfully!"}
-            else:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-                
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Model pull timed out. Large models may take longer.")
-    except Exception as e:
-        logger.error(f"Pull error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await pull_ollama_model(model)
+
 
 @app.get("/ollama/models")
-async def list_models():
+async def list_models_route():
     """List available Ollama models."""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            res = await client.get(f"{AI_SERVER_URL}/api/tags")
-            if res.status_code == 200:
-                models = res.json().get("models", [])
-                return {"success": True, "models": [m["name"] for m in models]}
-            return {"success": False, "models": [], "error": "Ollama not responding"}
-    except:
-        return {"success": False, "models": [], "error": "Cannot connect to Ollama"}
+    return await list_ollama_models()
 
+
+# =============================================================================
 # Mount static files
-static_path = Path("/app/static")
-if static_path.exists():
-    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+# =============================================================================
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+
+# =============================================================================
+# Entry point
+# =============================================================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8765)

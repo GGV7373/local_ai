@@ -185,6 +185,72 @@ check_native_ollama() {
         else
             echo -e "${YELLOW}   No models found. We'll download one for you.${NC}"
         fi
+        
+        # Check if Ollama is accessible from Docker (bound to 0.0.0.0)
+        echo ""
+        echo -e "${BLUE}🔧 Checking Ollama network binding...${NC}"
+        
+        # Check what address Ollama is listening on
+        OLLAMA_BIND=$(ss -tlnp 2>/dev/null | grep ":11434" | head -1 || netstat -tlnp 2>/dev/null | grep ":11434" | head -1)
+        
+        if echo "$OLLAMA_BIND" | grep -q "127.0.0.1:11434"; then
+            echo -e "${YELLOW}⚠️  Ollama is only listening on localhost (127.0.0.1)${NC}"
+            echo -e "${YELLOW}   Docker containers won't be able to connect.${NC}"
+            echo ""
+            echo -e "${CYAN}   To fix this, you need to set OLLAMA_HOST=0.0.0.0${NC}"
+            echo ""
+            echo "   Option 1 - Restart Ollama with:"
+            echo "     OLLAMA_HOST=0.0.0.0 ollama serve"
+            echo ""
+            echo "   Option 2 - For systemd service, run:"
+            echo "     sudo systemctl edit ollama"
+            echo "   Then add:"
+            echo "     [Service]"
+            echo "     Environment=\"OLLAMA_HOST=0.0.0.0\""
+            echo ""
+            read -p "Try to restart Ollama with correct binding? (y/n) [y]: " FIX_BINDING
+            FIX_BINDING=${FIX_BINDING:-y}
+            
+            if [[ "$FIX_BINDING" =~ ^[Yy]$ ]]; then
+                echo -e "${BLUE}🔄 Restarting Ollama with OLLAMA_HOST=0.0.0.0...${NC}"
+                
+                # Stop existing Ollama
+                sudo systemctl stop ollama 2>/dev/null || pkill ollama 2>/dev/null || true
+                sleep 2
+                
+                # Try systemd override first
+                if command -v systemctl &>/dev/null && systemctl list-unit-files | grep -q ollama; then
+                    sudo mkdir -p /etc/systemd/system/ollama.service.d/
+                    echo -e "[Service]\nEnvironment=\"OLLAMA_HOST=0.0.0.0\"" | sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null
+                    sudo systemctl daemon-reload
+                    sudo systemctl start ollama
+                    sleep 3
+                    
+                    if curl -s --connect-timeout 2 http://localhost:11434/api/tags &>/dev/null; then
+                        echo -e "${GREEN}✓${NC} Ollama restarted with network access enabled!"
+                    else
+                        echo -e "${RED}❌ Failed to restart Ollama via systemd${NC}"
+                    fi
+                else
+                    # Start manually in background
+                    OLLAMA_HOST=0.0.0.0 nohup ollama serve > /tmp/ollama.log 2>&1 &
+                    sleep 3
+                    
+                    if curl -s --connect-timeout 2 http://localhost:11434/api/tags &>/dev/null; then
+                        echo -e "${GREEN}✓${NC} Ollama started with network access enabled!"
+                    else
+                        echo -e "${RED}❌ Failed to start Ollama${NC}"
+                    fi
+                fi
+            else
+                echo -e "${YELLOW}⚠️  You may need to manually configure OLLAMA_HOST=0.0.0.0${NC}"
+            fi
+        elif echo "$OLLAMA_BIND" | grep -q "0.0.0.0:11434\|\*:11434"; then
+            echo -e "${GREEN}✓${NC} Ollama is listening on all interfaces (accessible from Docker)"
+        else
+            echo -e "${CYAN}ℹ${NC}  Could not determine Ollama binding, proceeding anyway..."
+        fi
+        
         echo ""
         return 0
     fi
@@ -445,11 +511,36 @@ GEMINI_API_KEY=$GEMINI_API_KEY
 EOF
 fi
 
-# Add Ollama URL based on native or docker (still useful as fallback)
+# Add Ollama URL based on native or docker
 if [ "$USE_NATIVE_OLLAMA" = true ]; then
+    # Get the Docker host IP that containers can reach
+    # Try multiple methods to find the right IP
+    DOCKER_HOST_IP=""
+    
+    # Method 1: Docker bridge gateway (most reliable on Linux)
+    DOCKER_HOST_IP=$(ip route show default | awk '/default/ {print $3}' 2>/dev/null)
+    
+    # Method 2: Try docker0 interface
+    if [ -z "$DOCKER_HOST_IP" ] || [ "$DOCKER_HOST_IP" = "0.0.0.0" ]; then
+        DOCKER_HOST_IP=$(ip addr show docker0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+    fi
+    
+    # Method 3: Use the local IP we already detected
+    if [ -z "$DOCKER_HOST_IP" ]; then
+        DOCKER_HOST_IP="$LOCAL_IP"
+    fi
+    
+    # Method 4: Fallback to host.docker.internal (works on Docker Desktop)
+    if [ -z "$DOCKER_HOST_IP" ]; then
+        DOCKER_HOST_IP="host.docker.internal"
+    fi
+    
+    echo -e "${CYAN}   Docker will connect to Ollama at: ${DOCKER_HOST_IP}:11434${NC}"
+    
     cat >> .env << EOF
-AI_SERVER_URL=http://host.docker.internal:11434
+AI_SERVER_URL=http://${DOCKER_HOST_IP}:11434
 USE_NATIVE_OLLAMA=true
+DOCKER_HOST_IP=${DOCKER_HOST_IP}
 EOF
 else
     cat >> .env << EOF

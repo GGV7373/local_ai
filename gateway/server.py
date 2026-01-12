@@ -9,6 +9,7 @@ import secrets
 import httpx
 import mimetypes
 import logging
+import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
@@ -279,8 +280,8 @@ def get_config() -> dict:
 # =============================================================================
 # AI Providers
 # =============================================================================
-async def ask_ollama(message: str, context: str, model: str = None) -> str:
-    """Query Ollama."""
+async def ask_ollama(message: str, context: str, model: str = None, language: str = "en") -> str:
+    """Query Ollama with retry logic and better error handling."""
     config = get_config()
     
     # Load custom system prompt if exists
@@ -290,7 +291,14 @@ async def ask_ollama(message: str, context: str, model: str = None) -> str:
     else:
         base_prompt = f"You are {config.get('assistant_name', 'Nora')}, an AI assistant for {config.get('company_name', 'the company')}."
     
-    system_prompt = f"""{base_prompt}
+    # Add language instruction
+    lang_instruction = ""
+    if language == "no":
+        lang_instruction = "\n\nIMPORTANT: Always respond in Norwegian (Norsk). The user prefers Norwegian language."
+    elif language == "en":
+        lang_instruction = "\n\nRespond in English."
+    
+    system_prompt = f"""{base_prompt}{lang_instruction}
 
 Use this information to answer questions:
 {context}
@@ -298,27 +306,73 @@ Use this information to answer questions:
 Be helpful, friendly, and concise. If asked about files or documents, refer to the information provided above."""
 
     use_model = model or AI_MODEL
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
-            f"{AI_SERVER_URL}/api/chat",
-            json={
-                "model": use_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message}
-                ],
-                "stream": False
-            }
-        )
-        response.raise_for_status()
-        return response.json()["message"]["content"]
+    
+    # Try with retries
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                # First check if Ollama is running
+                try:
+                    health_check = await client.get(f"{AI_SERVER_URL}/api/tags", timeout=5.0)
+                    if health_check.status_code != 200:
+                        raise ConnectionError("Ollama is not responding")
+                except httpx.ConnectError:
+                    raise ConnectionError(
+                        "Failed to connect to Ollama. Please check that:\n"
+                        "1. Ollama is installed (https://ollama.com/download)\n"
+                        "2. Ollama is running (run 'ollama serve' in terminal)\n"
+                        "3. The AI_SERVER_URL is correct in your configuration"
+                    )
+                
+                response = await client.post(
+                    f"{AI_SERVER_URL}/api/chat",
+                    json={
+                        "model": use_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": message}
+                        ],
+                        "stream": False
+                    }
+                )
+                response.raise_for_status()
+                return response.json()["message"]["content"]
+        except httpx.ConnectError as e:
+            last_error = ConnectionError(
+                "Failed to connect to Ollama. Please check that:\n"
+                "1. Ollama is installed (https://ollama.com/download)\n"
+                "2. Ollama is running (run 'ollama serve' in terminal)\n"
+                "3. The AI_SERVER_URL is correct in your configuration"
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                last_error = ValueError(f"Model '{use_model}' not found. Please run: ollama pull {use_model}")
+            else:
+                last_error = e
+        except Exception as e:
+            last_error = e
+        
+        if attempt < max_retries - 1:
+            await asyncio.sleep(1)  # Wait before retry
+    
+    raise last_error or Exception("Failed to connect to Ollama after multiple attempts")
 
-async def ask_gemini(message: str, context: str, model: str = None) -> str:
+async def ask_gemini(message: str, context: str, model: str = None, language: str = "en") -> str:
     """Query Google Gemini."""
     config = get_config()
     use_model = model or AI_MODEL or "gemini-1.5-flash"
     
-    prompt = f"""You are {config.get('assistant_name', 'Nora')}, an AI assistant for {config.get('company_name', 'the company')}.
+    # Add language instruction
+    lang_instruction = ""
+    if language == "no":
+        lang_instruction = "\n\nIMPORTANT: Always respond in Norwegian (Norsk). The user prefers Norwegian language."
+    elif language == "en":
+        lang_instruction = "\nRespond in English."
+    
+    prompt = f"""You are {config.get('assistant_name', 'Nora')}, an AI assistant for {config.get('company_name', 'the company')}.{lang_instruction}
 
 Use this information to answer questions:
 {context}
@@ -336,17 +390,24 @@ Be helpful, friendly, and concise."""
         data = response.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
-async def ask_ai(message: str, provider: str = None, model: str = None) -> str:
+async def ask_ai(message: str, provider: str = None, model: str = None, language: str = "en") -> str:
     """Query the AI with company context. Supports dynamic provider switching."""
     context = load_company_context()
     
     # Use specified provider or fall back to default
     use_provider = provider or AI_PROVIDER
     
-    if use_provider == "gemini" and GEMINI_API_KEY:
-        return await ask_gemini(message, context, model)
-    else:
-        return await ask_ollama(message, context, model)
+    try:
+        if use_provider == "gemini" and GEMINI_API_KEY:
+            return await ask_gemini(message, context, model, language)
+        else:
+            return await ask_ollama(message, context, model, language)
+    except ConnectionError as e:
+        # Try to fall back to Gemini if Ollama fails and Gemini is available
+        if use_provider == "ollama" and GEMINI_API_KEY:
+            logger.warning("Ollama unavailable, falling back to Gemini")
+            return await ask_gemini(message, context, model, language) + "\n\n*(Note: Using Gemini as Ollama is currently unavailable)*"
+        raise
 
 # =============================================================================
 # Models
@@ -359,6 +420,7 @@ class ChatRequest(BaseModel):
     message: str
     provider: Optional[str] = None  # Optional: "ollama" or "gemini"
     model: Optional[str] = None  # Optional: override model
+    language: Optional[str] = "en"  # Optional: "en" for English, "no" for Norwegian
 
 class FileInfo(BaseModel):
     name: str
@@ -482,15 +544,29 @@ async def verify_auth(user: str = Depends(get_current_user)):
 async def chat(request: ChatRequest, user: str = Depends(get_current_user)):
     """Chat with the AI (requires authentication). Supports provider switching."""
     try:
-        response = await ask_ai(request.message, request.provider, request.model)
+        response = await ask_ai(request.message, request.provider, request.model, request.language)
         return {
             "response": response,
             "provider": request.provider or AI_PROVIDER,
-            "model": request.model or AI_MODEL
+            "model": request.model or AI_MODEL,
+            "success": True
         }
+    except ConnectionError as e:
+        logger.error(f"Connection error: {e}")
+        error_msg = str(e)
+        if "ollama" in error_msg.lower():
+            return {
+                "response": f"❌ **Connection Error**\n\n{error_msg}\n\n**Quick Fix:**\n1. Open a terminal\n2. Run: `ollama serve`\n3. Try again\n\nOr switch to Gemini if you have an API key configured.",
+                "success": False,
+                "error_type": "connection"
+            }
+        return {"response": f"Sorry, I couldn't connect: {error_msg}", "success": False}
+    except ValueError as e:
+        logger.error(f"Value error: {e}")
+        return {"response": f"⚠️ **Configuration Error**\n\n{str(e)}", "success": False, "error_type": "config"}
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        return {"response": f"Sorry, I encountered an error: {str(e)}"}
+        return {"response": f"Sorry, I encountered an error: {str(e)}", "success": False}
 
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):

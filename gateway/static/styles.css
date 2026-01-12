@@ -817,3 +817,110 @@ body {
 .provider-selector select option:disabled {
     color: var(--text-secondary);
 }
+
+/* ============ CHAT ACTIONS ============ */
+.chat-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.action-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.action-btn.delete:hover {
+    background: rgba(255, 71, 87, 0.2);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+/* ============ CHAT HISTORY VIEW ============ */
+.history-header {
+    margin-bottom: 20px;
+}
+
+.history-header h2 {
+    color: var(--accent);
+    font-size: 1.3rem;
+}
+
+.history-list {
+    display: grid;
+    gap: 15px;
+}
+
+.history-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.2s;
+}
+
+.history-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.history-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.history-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.history-provider {
+    font-size: 1.2rem;
+}
+
+.history-meta {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 15px;
+}
+
+.history-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.empty-history {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+}
+
+.empty-icon {
+    font-size: 4rem;
+    display: block;
+    margin-bottom: 20px;
+    opacity: 0.5;
+}
+
+/* ============ LANGUAGE SELECTOR ============ */
+#languageSelect {
+    min-width: 100px;
+}

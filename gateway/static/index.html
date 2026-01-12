@@ -9,7 +9,7 @@
 </head>
 <body>
     <!-- Login Page -->
-    <div id="loginPage" class="login-container">
+    <div id="loginPage" class="login-container" style="display: none;">
         <div class="login-box">
             <h1>🤖 Nora AI</h1>
             <p class="subtitle">Sign in to continue</p>
@@ -52,6 +52,10 @@
                     <span class="icon">💬</span>
                     <span>Chat</span>
                 </div>
+                <div class="nav-item" data-view="history" onclick="switchView('history')">
+                    <span class="icon">📜</span>
+                    <span>Chat History</span>
+                </div>
                 <div class="nav-item" data-view="files" onclick="switchView('files')">
                     <span class="icon">📁</span>
                     <span>Files</span>
@@ -76,23 +80,41 @@
             <!-- Chat View -->
             <div id="chatView" class="content-body">
                 <div class="chat-container">
-                    <div class="chat-header" style="padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
+                    <div class="chat-header" style="padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 10px;">
                         <div class="provider-selector">
-                            <select id="providerSelect" onchange="onProviderChange()">
+                            <select id="providerSelect" onchange="onProviderChange()" title="Select AI Provider">
                                 <option value="ollama">🖥️ Ollama (Local)</option>
                                 <option value="gemini">✨ Gemini</option>
                             </select>
-                            <select id="modelSelect" onchange="onModelChange()">
+                            <select id="modelSelect" onchange="onModelChange()" title="Select Model">
                                 <option value="">Default Model</option>
                             </select>
+                            <select id="languageSelect" onchange="onLanguageChange()" title="Response Language">
+                                <option value="en">🇬🇧 English</option>
+                                <option value="no">🇳🇴 Norsk</option>
+                            </select>
                         </div>
-                        <button class="clear-chat-btn" onclick="clearChat()">🗑️ Clear Chat</button>
+                        <div class="chat-actions">
+                            <button class="action-btn" onclick="saveCurrentChat()" title="Save Chat">💾 Save</button>
+                            <button class="action-btn" onclick="clearChat()" title="Clear Chat">🗑️ Clear</button>
+                        </div>
                     </div>
                     <div class="messages" id="messages"></div>
                     <div class="chat-input-area">
-                        <input type="text" class="chat-input" id="chatInput" placeholder="Type your message..." autofocus>
+                        <input type="text" class="chat-input" id="chatInput" placeholder="Type your message... / Skriv meldingen din..." autofocus>
                         <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
                     </div>
+                </div>
+            </div>
+
+            <!-- Chat History View -->
+            <div id="historyView" class="content-body" style="display: none;">
+                <div class="history-header">
+                    <h2>💬 Saved Conversations</h2>
+                    <p style="color: var(--text-secondary); margin-top: 5px;">Your chat history is saved locally in your browser.</p>
+                </div>
+                <div class="history-list" id="historyList">
+                    <p style="color: var(--text-secondary); text-align: center; padding: 40px;">No saved chats yet. Start a conversation and click "Save" to keep it!</p>
                 </div>
             </div>
 

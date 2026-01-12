@@ -6,9 +6,12 @@ let currentUser = localStorage.getItem('nora_user');
 let config = { assistant_name: 'Nora', company_name: 'My Company' };
 let currentFileDir = 'uploads';
 let chatHistory = [];
+let savedChats = JSON.parse(localStorage.getItem('nora_saved_chats') || '[]');
 let providers = [];
 let currentProvider = localStorage.getItem('nora_provider') || 'ollama';
 let currentModel = localStorage.getItem('nora_model') || '';
+let currentLanguage = localStorage.getItem('nora_language') || 'en';
+let currentChatId = null;
 
 // =============================================================================
 // Toast Notifications
@@ -73,6 +76,11 @@ function renderMarkdown(text) {
 // Initialization
 // =============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
+    // If no token, show login immediately
+    if (!token) {
+        showLogin();
+    }
+    
     // Load config
     try {
         const res = await fetch('/config');
@@ -86,8 +94,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load providers
     await loadProviders();
+    
+    // Load saved language preference
+    const langSelect = document.getElementById('languageSelect');
+    if (langSelect) {
+        langSelect.value = currentLanguage;
+    }
 
-    // Check auth
+    // Check auth - only if we have a token
     if (token) {
         const valid = await verifyToken();
         if (valid) {
@@ -95,8 +109,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             showLogin();
         }
-    } else {
-        showLogin();
     }
 
     // Setup event listeners
@@ -219,8 +231,11 @@ function showApp() {
     document.getElementById('userName').textContent = currentUser || 'User';
     document.getElementById('userAvatar').textContent = (currentUser || 'U')[0].toUpperCase();
 
-    // Add welcome message
-    addMessage(`Hi! I'm ${config.assistant_name}, your AI assistant for ${config.company_name}. How can I help you today?`, 'assistant');
+    // Add welcome message based on language
+    const greeting = currentLanguage === 'no' 
+        ? `Hei! Jeg er ${config.assistant_name}, din AI-assistent for ${config.company_name}. Hvordan kan jeg hjelpe deg i dag?`
+        : `Hi! I'm ${config.assistant_name}, your AI assistant for ${config.company_name}. How can I help you today?`;
+    addMessage(greeting, 'assistant');
 }
 
 // =============================================================================
@@ -248,8 +263,12 @@ function clearChat() {
     const messages = document.getElementById('messages');
     messages.innerHTML = '';
     chatHistory = [];
-    addMessage(`Hi! I'm ${config.assistant_name}, your AI assistant for ${config.company_name}. How can I help you today?`, 'assistant');
-    showToast('Chat cleared', 'success');
+    currentChatId = null;
+    const greeting = currentLanguage === 'no' 
+        ? `Hei! Jeg er ${config.assistant_name}, din AI-assistent for ${config.company_name}. Hvordan kan jeg hjelpe deg i dag?`
+        : `Hi! I'm ${config.assistant_name}, your AI assistant for ${config.company_name}. How can I help you today?`;
+    addMessage(greeting, 'assistant');
+    showToast(currentLanguage === 'no' ? 'Chat tømt' : 'Chat cleared', 'success');
 }
 
 function showTyping() {
@@ -288,7 +307,8 @@ async function sendMessage() {
             body: JSON.stringify({ 
                 message: text,
                 provider: currentProvider,
-                model: currentModel || null
+                model: currentModel || null,
+                language: currentLanguage
             })
         });
 
@@ -301,10 +321,18 @@ async function sendMessage() {
 
         const data = await res.json();
         addMessage(data.response, 'assistant', true);
+        
+        // Show warning if there was an error but we got a response
+        if (data.success === false && data.error_type === 'connection') {
+            showToast(currentLanguage === 'no' ? 'Tilkoblingsproblem - sjekk Ollama' : 'Connection issue - check Ollama', 'warning', 5000);
+        }
     } catch (e) {
         hideTyping();
-        addMessage('Sorry, something went wrong. Please try again.', 'assistant');
-        showToast('Failed to send message', 'error');
+        const errorMsg = currentLanguage === 'no' 
+            ? 'Beklager, noe gikk galt. Vennligst prøv igjen.'
+            : 'Sorry, something went wrong. Please try again.';
+        addMessage(errorMsg, 'assistant');
+        showToast(currentLanguage === 'no' ? 'Kunne ikke sende melding' : 'Failed to send message', 'error');
     }
 
     document.getElementById('sendBtn').disabled = false;
@@ -562,12 +590,14 @@ function switchView(view) {
 
     // Show/hide views
     document.getElementById('chatView').style.display = view === 'chat' ? 'block' : 'none';
+    document.getElementById('historyView').style.display = view === 'history' ? 'block' : 'none';
     document.getElementById('filesView').style.display = view === 'files' ? 'block' : 'none';
     document.getElementById('statsView').style.display = view === 'stats' ? 'block' : 'none';
 
     // Load data
     if (view === 'files') loadFiles();
     if (view === 'stats') loadStats();
+    if (view === 'history') loadChatHistory();
 
     // Close mobile sidebar
     document.getElementById('sidebar').classList.remove('open');
@@ -649,4 +679,176 @@ function onModelChange() {
     if (currentModel) {
         showToast(`Using model: ${currentModel}`, 'info');
     }
+}
+
+// =============================================================================
+// Language Selection
+// =============================================================================
+function onLanguageChange() {
+    const langSelect = document.getElementById('languageSelect');
+    currentLanguage = langSelect.value;
+    localStorage.setItem('nora_language', currentLanguage);
+    
+    const langName = currentLanguage === 'no' ? 'Norsk' : 'English';
+    showToast(currentLanguage === 'no' ? `Språk endret til ${langName}` : `Language changed to ${langName}`, 'success');
+}
+
+// =============================================================================
+// Chat History Management
+// =============================================================================
+function saveCurrentChat() {
+    if (chatHistory.length <= 1) {
+        showToast(currentLanguage === 'no' ? 'Ingen samtale å lagre' : 'No conversation to save', 'warning');
+        return;
+    }
+    
+    const chatId = currentChatId || Date.now().toString();
+    const firstUserMsg = chatHistory.find(m => m.role === 'user');
+    const title = firstUserMsg ? firstUserMsg.content.substring(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '') : 'Untitled Chat';
+    
+    const chatData = {
+        id: chatId,
+        title: title,
+        timestamp: new Date().toISOString(),
+        messages: [...chatHistory],
+        provider: currentProvider,
+        model: currentModel,
+        language: currentLanguage
+    };
+    
+    // Update or add chat
+    const existingIndex = savedChats.findIndex(c => c.id === chatId);
+    if (existingIndex >= 0) {
+        savedChats[existingIndex] = chatData;
+    } else {
+        savedChats.unshift(chatData);
+    }
+    
+    // Keep only last 50 chats
+    if (savedChats.length > 50) {
+        savedChats = savedChats.slice(0, 50);
+    }
+    
+    localStorage.setItem('nora_saved_chats', JSON.stringify(savedChats));
+    currentChatId = chatId;
+    
+    showToast(currentLanguage === 'no' ? 'Samtale lagret!' : 'Chat saved!', 'success');
+}
+
+function loadChatHistory() {
+    const historyList = document.getElementById('historyList');
+    savedChats = JSON.parse(localStorage.getItem('nora_saved_chats') || '[]');
+    
+    if (savedChats.length === 0) {
+        historyList.innerHTML = `
+            <div class="empty-history">
+                <span class="empty-icon">💬</span>
+                <p>${currentLanguage === 'no' ? 'Ingen lagrede samtaler ennå.' : 'No saved chats yet.'}</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">${currentLanguage === 'no' ? 'Start en samtale og klikk "Lagre" for å beholde den!' : 'Start a conversation and click "Save" to keep it!'}</p>
+            </div>
+        `;
+        return;
+    }
+    
+    historyList.innerHTML = savedChats.map(chat => {
+        const date = new Date(chat.timestamp).toLocaleDateString();
+        const time = new Date(chat.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const msgCount = chat.messages.filter(m => m.role === 'user').length;
+        const providerIcon = chat.provider === 'gemini' ? '✨' : '🖥️';
+        
+        return `
+            <div class="history-card" data-id="${chat.id}">
+                <div class="history-card-header">
+                    <h3 class="history-title">${escapeHtml(chat.title)}</h3>
+                    <span class="history-provider">${providerIcon}</span>
+                </div>
+                <div class="history-meta">
+                    <span>📅 ${date} ${time}</span>
+                    <span>💬 ${msgCount} ${currentLanguage === 'no' ? 'meldinger' : 'messages'}</span>
+                    <span>${chat.language === 'no' ? '🇳🇴' : '🇬🇧'}</span>
+                </div>
+                <div class="history-actions">
+                    <button class="action-btn" onclick="loadSavedChat('${chat.id}')">${currentLanguage === 'no' ? '📂 Åpne' : '📂 Open'}</button>
+                    <button class="action-btn delete" onclick="deleteSavedChat('${chat.id}')">${currentLanguage === 'no' ? '🗑️ Slett' : '🗑️ Delete'}</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function loadSavedChat(chatId) {
+    const chat = savedChats.find(c => c.id === chatId);
+    if (!chat) {
+        showToast(currentLanguage === 'no' ? 'Samtale ikke funnet' : 'Chat not found', 'error');
+        return;
+    }
+    
+    // Clear current chat
+    const messages = document.getElementById('messages');
+    messages.innerHTML = '';
+    chatHistory = [];
+    currentChatId = chatId;
+    
+    // Set language and provider from saved chat
+    if (chat.language) {
+        currentLanguage = chat.language;
+        localStorage.setItem('nora_language', currentLanguage);
+        document.getElementById('languageSelect').value = currentLanguage;
+    }
+    if (chat.provider) {
+        currentProvider = chat.provider;
+        localStorage.setItem('nora_provider', currentProvider);
+        document.getElementById('providerSelect').value = currentProvider;
+        updateModelDropdown();
+    }
+    if (chat.model) {
+        currentModel = chat.model;
+        localStorage.setItem('nora_model', currentModel);
+        document.getElementById('modelSelect').value = currentModel;
+    }
+    
+    // Restore messages
+    chat.messages.forEach(msg => {
+        addMessage(msg.content, msg.role, msg.role === 'assistant');
+    });
+    
+    // Switch to chat view
+    switchView('chat');
+    showToast(currentLanguage === 'no' ? 'Samtale lastet!' : 'Chat loaded!', 'success');
+}
+
+function deleteSavedChat(chatId) {
+    const confirmMsg = currentLanguage === 'no' ? 'Er du sikker på at du vil slette denne samtalen?' : 'Are you sure you want to delete this chat?';
+    if (!confirm(confirmMsg)) return;
+    
+    savedChats = savedChats.filter(c => c.id !== chatId);
+    localStorage.setItem('nora_saved_chats', JSON.stringify(savedChats));
+    
+    if (currentChatId === chatId) {
+        currentChatId = null;
+    }
+    
+    loadChatHistory();
+    showToast(currentLanguage === 'no' ? 'Samtale slettet' : 'Chat deleted', 'success');
+}
+
+function exportAllChats() {
+    if (savedChats.length === 0) {
+        showToast(currentLanguage === 'no' ? 'Ingen samtaler å eksportere' : 'No chats to export', 'warning');
+        return;
+    }
+    
+    const dataStr = JSON.stringify(savedChats, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nora-chat-history-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast(currentLanguage === 'no' ? 'Samtaler eksportert!' : 'Chats exported!', 'success');
 }

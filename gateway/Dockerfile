@@ -22,7 +22,8 @@ RUN pip install --no-cache-dir \
     pandas==2.1.3 \
     openpyxl==3.1.2 \
     xlrd==2.0.1 \
-    bcrypt==4.1.1
+    bcrypt==4.1.1 \
+    asyncio==3.0.3
 
 COPY server.py .
 COPY static/ ./static/

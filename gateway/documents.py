@@ -20,7 +20,13 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
-from config import COMPANY_INFO_DIR, cache
+try:
+    from speech_recognition import AudioFile, Recognizer
+    SPEECH_RECOGNITION_AVAILABLE = True
+except ImportError:
+    SPEECH_RECOGNITION_AVAILABLE = False
+
+from config import COMPANY_INFO_DIR, UPLOADS_DIR, cache
 
 logger = logging.getLogger(__name__)
 
@@ -138,3 +144,94 @@ def save_uploaded_file(filename: str, content: bytes, subdir: Optional[str] = No
             del cache['timestamps']['company_context']
     
     return str(file_path)
+
+
+def transcribe_audio(filepath: str) -> str:
+    """
+    Transcribe audio file to text using available methods.
+    Tries to use SpeechRecognition library, falls back to file description.
+    """
+    if not SPEECH_RECOGNITION_AVAILABLE:
+        logger.warning("speech_recognition library not installed")
+        filename = Path(filepath).name
+        return f"[Audio file detected: {filename}. To transcribe, please install: pip install SpeechRecognition pydub]"
+    
+    try:
+        from speech_recognition import AudioFile, Recognizer
+        recognizer = Recognizer()
+        
+        with AudioFile(filepath) as source:
+            audio_data = recognizer.record(source)
+        
+        try:
+            # Try Google Speech Recognition (free, no API key needed)
+            text = recognizer.recognize_google(audio_data)
+            return text
+        except Exception as e:
+            logger.warning(f"Google Speech Recognition failed: {e}")
+            return f"[Audio file: {Path(filepath).name} - transcription unavailable. Please use the voice input feature instead.]"
+    
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {e}")
+        return f"[Error transcribing audio file: {str(e)}]"
+
+
+def save_chat_to_file(chat_history: list, format: str = 'txt', filename: Optional[str] = None) -> str:
+    """
+    Save chat conversation to a text file.
+    
+    Args:
+        chat_history: List of chat messages with 'role' and 'content'
+        format: File format ('txt' or 'md' for markdown)
+        filename: Optional custom filename
+    
+    Returns:
+        Path to saved file
+    """
+    from datetime import datetime
+    
+    # Create exports directory if it doesn't exist
+    export_dir = UPLOADS_DIR / 'exports'
+    export_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate filename
+    if not filename:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"chat_export_{timestamp}.{format}"
+    
+    file_path = export_dir / filename
+    
+    # Handle existing files
+    counter = 1
+    original_stem = file_path.stem
+    while file_path.exists():
+        file_path = export_dir / f"{original_stem}_{counter}.{format}"
+        counter += 1
+    
+    # Build content
+    if format == 'md':
+        # Markdown format
+        content = "# Chat Export\n\n"
+        content += f"*Exported on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
+        
+        for message in chat_history:
+            role = message.get('role', 'unknown').upper()
+            text = message.get('content', '')
+            content += f"## {role}\n\n{text}\n\n---\n\n"
+    else:
+        # Plain text format
+        content = "CHAT EXPORT\n"
+        content += f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        content += "=" * 50 + "\n\n"
+        
+        for message in chat_history:
+            role = message.get('role', 'unknown').upper()
+            text = message.get('content', '')
+            content += f"{role}:\n{text}\n\n"
+    
+    # Save file
+    file_path.write_text(content, encoding='utf-8')
+    logger.info(f"Chat saved to {file_path}")
+    
+    return str(file_path.relative_to(export_dir))
+

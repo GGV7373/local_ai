@@ -280,6 +280,33 @@ function setupEventListeners() {
         handleFiles(e.target.files);
     });
 
+    // Audio file upload
+    const audioUploadZone = document.getElementById('audioUploadZone');
+    const audioInput = document.getElementById('audioInput');
+    
+    if (audioUploadZone) {
+        audioUploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            audioUploadZone.classList.add('dragover');
+        });
+        
+        audioUploadZone.addEventListener('dragleave', () => {
+            audioUploadZone.classList.remove('dragover');
+        });
+        
+        audioUploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            audioUploadZone.classList.remove('dragover');
+            handleAudioFiles(e.dataTransfer.files);
+        });
+    }
+    
+    if (audioInput) {
+        audioInput.addEventListener('change', (e) => {
+            handleAudioFiles(e.target.files);
+        });
+    }
+
     // Modal close on outside click
     document.getElementById('fileModal').addEventListener('click', (e) => {
         if (e.target.id === 'fileModal') closeModal();
@@ -670,6 +697,98 @@ async function handleFiles(files) {
     document.getElementById('fileInput').value = '';
 }
 
+async function handleAudioFiles(files) {
+    if (files.length === 0) return;
+    
+    const audioFile = files[0];
+    const audioExtensions = ['.wav', '.mp3', '.m4a', '.ogg', '.flac'];
+    const ext = audioFile.name.substring(audioFile.name.lastIndexOf('.')).toLowerCase();
+    
+    if (!audioExtensions.includes(ext)) {
+        showToast(`Invalid audio format. Supported: ${audioExtensions.join(', ')}`, 'error');
+        return;
+    }
+    
+    showToast(`Transcribing ${audioFile.name}...`, 'info');
+    
+    const formData = new FormData();
+    formData.append('file', audioFile);
+    
+    try {
+        const res = await fetch('/files/transcribe', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            document.getElementById('transcriptionText').textContent = data.transcription;
+            document.getElementById('audioTranscriptionResult').style.display = 'block';
+            showToast('Audio transcribed successfully!', 'success');
+        } else {
+            const error = await res.json();
+            showToast(`Transcription error: ${error.detail}`, 'error');
+        }
+    } catch (e) {
+        showToast('Error transcribing audio: ' + e.message, 'error');
+    }
+    
+    document.getElementById('audioInput').value = '';
+}
+
+function insertTranscriptionToChat() {
+    const transcriptionText = document.getElementById('transcriptionText').textContent;
+    if (transcriptionText) {
+        const chatInput = document.getElementById('chatInput');
+        chatInput.value = transcriptionText;
+        chatInput.focus();
+        showToast('Transcription inserted to chat!', 'success');
+    }
+}
+
+async function exportChatToFile(format = 'txt') {
+    if (chatHistory.length <= 1) {
+        showToast(currentLanguage === 'no' ? 'Ingen samtale å eksportere' : 'No conversation to export', 'warning');
+        return;
+    }
+    
+    showToast('Exporting chat...', 'info');
+    
+    try {
+        const res = await fetch('/chat/save', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messages: chatHistory,
+                format: format
+            })
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            
+            // Auto-download the file
+            const downloadLink = document.createElement('a');
+            downloadLink.href = data.download_path;
+            downloadLink.download = data.filename;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            
+            showToast(`Chat exported as ${format.toUpperCase()}!`, 'success');
+        } else {
+            const error = await res.json();
+            showToast(`Export error: ${error.detail}`, 'error');
+        }
+    } catch (e) {
+        showToast('Error exporting chat: ' + e.message, 'error');
+    }
+}
+
 function switchFileTab(dir) {
     currentFileDir = dir;
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -878,6 +997,15 @@ function saveCurrentChat() {
     currentChatId = chatId;
     
     showToast(currentLanguage === 'no' ? 'Samtale lagret!' : 'Chat saved!', 'success');
+    
+    // Ask user if they want to export to file
+    const hasExport = confirm(currentLanguage === 'no' 
+        ? 'Vil du eksportere samtalen som en .txt-fil?' 
+        : 'Would you like to export the chat as a .txt file?');
+    
+    if (hasExport) {
+        exportChatToFile('txt');
+    }
 }
 
 function loadChatHistory() {

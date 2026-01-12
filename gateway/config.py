@@ -62,7 +62,8 @@ ALLOWED_EXTENSIONS: Set[str] = {
     '.doc', '.docx', '.pdf', '.rtf',
     '.xls', '.xlsx',
     '.html', '.htm',
-    '.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.css'
+    '.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.css',
+    '.wav', '.mp3', '.m4a', '.ogg', '.flac'  # Audio files
 }
 
 # =============================================================================

@@ -688,6 +688,78 @@ async def file_stats(user: str = Depends(get_current_user)):
     return stats
 
 
+@app.post("/files/transcribe")
+async def transcribe_audio_file(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user)
+):
+    """Transcribe an audio file (WAV, MP3, etc) to text."""
+    suffix = Path(file.filename).suffix.lower()
+    
+    # Check if it's an audio file
+    audio_extensions = {'.wav', '.mp3', '.m4a', '.ogg', '.flac'}
+    if suffix not in audio_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File must be an audio file. Supported: {', '.join(audio_extensions)}"
+        )
+    
+    # Save uploaded file temporarily
+    temp_dir = UPLOADS_DIR / 'temp'
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    temp_path = temp_dir / file.filename
+    content = await file.read()
+    temp_path.write_bytes(content)
+    
+    try:
+        # Transcribe the audio
+        from documents import transcribe_audio
+        transcribed_text = transcribe_audio(str(temp_path))
+        
+        return {
+            "success": True,
+            "filename": file.filename,
+            "transcription": transcribed_text,
+            "size": len(content)
+        }
+    finally:
+        # Clean up temp file
+        try:
+            temp_path.unlink()
+        except:
+            pass
+
+
+@app.post("/chat/save")
+async def save_chat_conversation(
+    chat_data: dict,
+    user: str = Depends(get_current_user)
+):
+    """Save current chat conversation to a file."""
+    try:
+        chat_history = chat_data.get('messages', [])
+        file_format = chat_data.get('format', 'txt')  # 'txt' or 'md'
+        
+        if file_format not in ['txt', 'md']:
+            raise HTTPException(status_code=400, detail="Format must be 'txt' or 'md'")
+        
+        from documents import save_chat_to_file
+        
+        saved_filename = save_chat_to_file(chat_history, format=file_format)
+        
+        return {
+            "success": True,
+            "filename": saved_filename,
+            "format": file_format,
+            "message_count": len(chat_history),
+            "download_path": f"/files/download/uploads/exports/{saved_filename}"
+        }
+    except Exception as e:
+        logger.error(f"Error saving chat: {e}")
+        raise HTTPException(status_code=500, detail=f"Error saving chat: {str(e)}")
+
+
 # =============================================================================
 # Ollama Setup & Installation Routes
 # =============================================================================

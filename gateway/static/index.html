@@ -131,12 +131,32 @@
                     </div>
                 </div>
 
-                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                    <div class="icon">📤</div>
-                    <p>Drag & drop files here or <span class="browse-link">browse</span></p>
-                    <p style="font-size: 0.85rem; margin-top: 10px;">.txt, .docx, .pdf, .json, .csv, .xlsx and more</p>
+                <div class="file-section">
+                    <h3>📁 Document Upload</h3>
+                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                        <div class="icon">📤</div>
+                        <p>Drag & drop files here or <span class="browse-link">browse</span></p>
+                        <p style="font-size: 0.85rem; margin-top: 10px;">.txt, .docx, .pdf, .json, .csv, .xlsx and more</p>
+                    </div>
+                    <input type="file" id="fileInput" class="hidden-input" multiple accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.doc,.docx,.pdf,.rtf,.xls,.xlsx,.html,.htm,.py,.js,.ts,.java,.cpp,.c,.h,.css">
                 </div>
-                <input type="file" id="fileInput" class="hidden-input" multiple accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.doc,.docx,.pdf,.rtf,.xls,.xlsx,.html,.htm,.py,.js,.ts,.java,.cpp,.c,.h,.css">
+
+                <div class="file-section">
+                    <h3>🎵 Audio Transcription</h3>
+                    <div class="upload-zone" id="audioUploadZone" onclick="document.getElementById('audioInput').click()">
+                        <div class="icon">🎤</div>
+                        <p>Drag & drop audio files here or <span class="browse-link">browse</span></p>
+                        <p style="font-size: 0.85rem; margin-top: 10px;">.wav, .mp3, .m4a, .ogg, .flac</p>
+                    </div>
+                    <input type="file" id="audioInput" class="hidden-input" accept=".wav,.mp3,.m4a,.ogg,.flac">
+                    <div id="audioTranscriptionResult" style="margin-top: 15px; display: none;">
+                        <div class="transcription-box">
+                            <h4>Transcription Result:</h4>
+                            <p id="transcriptionText"></p>
+                            <button class="btn btn-secondary" onclick="insertTranscriptionToChat()" style="margin-top: 10px;">💬 Insert to Chat</button>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="files-grid" id="filesGrid"></div>
             </div>

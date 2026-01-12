@@ -1,6 +1,6 @@
 """
 Nora AI - Gateway Server (Main Application)
-Modular FastAPI application with authentication, AI chat, and file management.
+Linux Private Server Edition with Streaming Support
 """
 import os
 import json
@@ -13,13 +13,14 @@ from typing import List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, File, UploadFile, Form, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
 import httpx
 
 # Import configuration
 from config import (
-    AI_SERVER_URL, AI_MODEL, AI_PROVIDER, GEMINI_API_KEY,
+    AI_SERVER_URL, AI_MODEL, AI_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL,
     COMPANY_INFO_DIR, UPLOADS_DIR, ALLOWED_EXTENSIONS, STATIC_DIR
 )
 
@@ -36,12 +37,13 @@ from models import LoginRequest, ChatRequest, FileInfo
 from documents import extract_text_from_file, load_company_context, get_config
 
 # Import AI providers
-from ai_providers import ask_ollama, ask_gemini, check_ollama_status
+from ai_providers import ask_ollama, ask_gemini, check_ollama_status, stream_ai, ask_ai as ai_ask
 
 # Import Ollama setup
 from ollama_setup import (
     get_system_info, check_ollama_connection, install_ollama_linux,
-    start_ollama_service, pull_ollama_model, list_ollama_models
+    start_ollama_service, pull_ollama_model, list_ollama_models,
+    get_ollama_health, delete_ollama_model
 )
 
 # Configure logging
@@ -316,7 +318,7 @@ async def get_providers():
         "name": "Ollama (Local)",
         "status": ollama_status,
         "models": ollama_models,
-        "default_model": AI_MODEL if AI_PROVIDER == "ollama" else "llama2"
+        "default_model": AI_MODEL if AI_PROVIDER == "ollama" else "llama3.2"
     })
     
     # Check Gemini
@@ -325,8 +327,8 @@ async def get_providers():
         "id": "gemini",
         "name": "Google Gemini",
         "status": gemini_status,
-        "models": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"] if GEMINI_API_KEY else [],
-        "default_model": AI_MODEL if AI_PROVIDER == "gemini" else "gemini-1.5-flash"
+        "models": ["gemini-2.0-flash", "gemini-2.5-flash-preview-05-20", "gemini-1.5-pro"] if GEMINI_API_KEY else [],
+        "default_model": GEMINI_MODEL if AI_PROVIDER == "gemini" else "gemini-2.0-flash"
     })
     
     return {
@@ -403,6 +405,48 @@ async def chat(request: ChatRequest, user: str = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Chat error: {e}")
         return {"response": f"Sorry, I encountered an error: {str(e)}", "success": False}
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest, user: str = Depends(get_current_user)):
+    """Stream chat response using Server-Sent Events (SSE)."""
+    context = load_document_context()
+    config = get_config()
+    
+    # Load system prompt
+    system_prompt_file = COMPANY_INFO_DIR / "system_prompt.txt"
+    if system_prompt_file.exists():
+        system_prompt = system_prompt_file.read_text()
+    else:
+        system_prompt = f"You are {config.get('assistant_name', 'Nora')}, an AI assistant for {config.get('company_name', 'the company')}."
+    
+    provider = request.provider or AI_PROVIDER
+    
+    async def event_generator():
+        try:
+            async for chunk in stream_ai(
+                prompt=request.message,
+                context=context,
+                system_prompt=system_prompt,
+                language=request.language,
+                provider=provider
+            ):
+                yield {
+                    "event": "message",
+                    "data": json.dumps({"chunk": chunk})
+                }
+            yield {
+                "event": "done",
+                "data": json.dumps({"success": True, "provider": provider})
+            }
+        except Exception as e:
+            logger.error(f"Streaming error: {e}")
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": str(e)})
+            }
+    
+    return EventSourceResponse(event_generator())
 
 
 @app.websocket("/ws")
@@ -675,6 +719,18 @@ async def pull_model_route(model: str, user: str = Depends(get_current_user)):
 async def list_models_route():
     """List available Ollama models."""
     return await list_ollama_models()
+
+
+@app.delete("/ollama/models/{model}")
+async def delete_model_route(model: str, user: str = Depends(get_current_user)):
+    """Delete an Ollama model."""
+    return await delete_ollama_model(model)
+
+
+@app.get("/ollama/health")
+async def ollama_health_route():
+    """Get comprehensive Ollama health status."""
+    return await get_ollama_health()
 
 
 # =============================================================================

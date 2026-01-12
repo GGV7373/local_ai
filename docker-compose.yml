@@ -1,3 +1,8 @@
+# =============================================================================
+# Nora AI - Linux Private Server Deployment
+# No cloud dependencies - direct IP access only
+# =============================================================================
+
 services:
   # ==========================================================================
   # Ollama - Local AI (use profile to skip if running natively)
@@ -14,6 +19,21 @@ services:
       - nora_network
     profiles:
       - docker-ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # ==========================================================================
   # Gateway - Web UI & API (with Authentication & File Management)
@@ -25,18 +45,23 @@ services:
     container_name: nora_gateway
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      - "${GATEWAY_PORT:-8765}:8765"
     environment:
       GATEWAY_HOST: "0.0.0.0"
       GATEWAY_PORT: "8765"
+      # AI Configuration
       AI_PROVIDER: "${AI_PROVIDER:-ollama}"
-      AI_SERVER_URL: "${AI_SERVER_URL:-http://ollama:11434}"
-      AI_MODEL: "${AI_MODEL:-llama2}"
+      AI_SERVER_URL: "${AI_SERVER_URL:-http://host.docker.internal:11434}"
+      AI_MODEL: "${AI_MODEL:-llama3.2}"
+      # Gemini Configuration
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.0-flash}"
       # Security Configuration
       SECRET_KEY: "${SECRET_KEY:-change_this_secret_key_in_production}"
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin123}"
+      # Server Configuration
+      SERVER_IP: "${SERVER_IP:-}"
     volumes:
       - ./company_info:/app/company_info:rw
       - ./uploads:/app/uploads:rw
@@ -44,25 +69,38 @@ services:
       - nora_network
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   # ==========================================================================
-  # Cloudflare Tunnel (Optional - Secure Public Access)
+  # Nginx Reverse Proxy (Optional - for SSL/HTTPS)
   # ==========================================================================
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: nora_cloudflared
+  nginx:
+    image: nginx:alpine
+    container_name: nora_nginx
     restart: unless-stopped
-    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    environment:
-      # Metrics and logging
-      TUNNEL_METRICS: "0.0.0.0:2000"
-      TUNNEL_LOGLEVEL: "info"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - nora_network
     depends_on:
       - gateway
     profiles:
-      - tunnel
-    networks:
-      - nora_network
+      - ssl
 
 volumes:
   ollama_data:

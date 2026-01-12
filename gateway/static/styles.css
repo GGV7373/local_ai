@@ -924,3 +924,243 @@ body {
 #languageSelect {
     min-width: 100px;
 }
+
+/* ============ SETUP MODAL ============ */
+.setup-modal {
+    max-width: 600px;
+}
+
+.setup-status {
+    text-align: center;
+    padding: 20px;
+    background: var(--bg-primary);
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.setup-status .status-icon {
+    font-size: 3rem;
+    margin-bottom: 10px;
+}
+
+.setup-status.connected .status-icon::before {
+    content: '✅';
+}
+
+.setup-tabs {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+}
+
+.setup-tab {
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+}
+
+.setup-tab:hover {
+    background: var(--bg-tertiary);
+}
+
+.setup-tab.active {
+    background: var(--accent);
+    color: var(--bg-primary);
+    border-color: var(--accent);
+}
+
+.setup-content {
+    background: var(--bg-primary);
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.setup-content h4 {
+    color: var(--accent);
+    margin-bottom: 15px;
+}
+
+.setup-content ol {
+    padding-left: 20px;
+    margin-bottom: 15px;
+}
+
+.setup-content li {
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+}
+
+.setup-content a {
+    color: var(--accent);
+}
+
+.code-box {
+    display: flex;
+    align-items: center;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 15px;
+    margin: 10px 0;
+    gap: 10px;
+}
+
+.code-box code {
+    flex: 1;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.9rem;
+    color: var(--accent);
+    word-break: break-all;
+}
+
+.copy-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.copy-btn:hover {
+    opacity: 1;
+}
+
+.setup-content .note {
+    font-size: 0.85rem;
+    color: var(--warning);
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(255, 165, 2, 0.1);
+    border-radius: 6px;
+}
+
+.setup-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.setup-actions .btn {
+    flex: 1;
+}
+
+/* ============ AUTO INSTALL ============ */
+.auto-install-box {
+    background: linear-gradient(135deg, rgba(0, 217, 255, 0.1), rgba(0, 255, 136, 0.1));
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.auto-install-box h4 {
+    color: var(--accent);
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+}
+
+.auto-install-box > p {
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+}
+
+.auto-install-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.install-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 15px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    transition: all 0.3s;
+}
+
+.install-step .step-icon {
+    font-size: 1.2rem;
+    width: 30px;
+    text-align: center;
+}
+
+.install-step .step-text {
+    color: var(--text-secondary);
+}
+
+.install-step.done {
+    background: rgba(46, 213, 115, 0.15);
+}
+
+.install-step.done .step-text {
+    color: var(--success);
+}
+
+.install-step.running {
+    background: rgba(0, 217, 255, 0.15);
+}
+
+.install-step.running .step-icon {
+    animation: spin 1s linear infinite;
+}
+
+.install-step.running .step-text {
+    color: var(--accent);
+}
+
+.install-step.error {
+    background: rgba(255, 71, 87, 0.15);
+}
+
+.install-step.error .step-text {
+    color: var(--danger);
+}
+
+.install-progress {
+    margin-top: 20px;
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.5s ease;
+}
+
+#progressText {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+#autoInstallBtn {
+    font-size: 1rem;
+    padding: 15px 30px;
+}
+
+#autoInstallBtn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}

@@ -852,3 +852,294 @@ function exportAllChats() {
     
     showToast(currentLanguage === 'no' ? 'Samtaler eksportert!' : 'Chats exported!', 'success');
 }
+
+// =============================================================================
+// Ollama Setup Modal
+// =============================================================================
+let systemInfo = null;
+
+async function showSetupModal() {
+    document.getElementById('setupModal').classList.add('active');
+    await checkSystemAndOllama();
+}
+
+function closeSetupModal() {
+    document.getElementById('setupModal').classList.remove('active');
+}
+
+function useGeminiInstead() {
+    closeSetupModal();
+    const geminiProvider = providers.find(p => p.id === 'gemini' && p.status === 'available');
+    if (geminiProvider) {
+        currentProvider = 'gemini';
+        localStorage.setItem('nora_provider', currentProvider);
+        document.getElementById('providerSelect').value = 'gemini';
+        updateModelDropdown();
+        showToast(currentLanguage === 'no' ? 'Byttet til Gemini' : 'Switched to Gemini', 'success');
+    } else {
+        showToast(currentLanguage === 'no' ? 'Gemini ikke konfigurert. Legg til GEMINI_API_KEY.' : 'Gemini not configured. Add GEMINI_API_KEY.', 'warning');
+    }
+}
+
+async function checkSystemAndOllama() {
+    const statusEl = document.getElementById('setupStatus');
+    statusEl.innerHTML = `
+        <div class="status-icon">🔄</div>
+        <p>${currentLanguage === 'no' ? 'Sjekker system...' : 'Checking system...'}</p>
+    `;
+    
+    try {
+        // Get system info
+        const sysRes = await fetch('/system/info', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        systemInfo = await sysRes.json();
+        
+        // Show/hide auto-install section based on system
+        const autoSection = document.getElementById('autoInstallSection');
+        const manualSection = document.getElementById('manualInstallSection');
+        
+        if (systemInfo.ollama_running) {
+            // Ollama is already running!
+            statusEl.innerHTML = `
+                <div class="status-icon">✅</div>
+                <p style="color: var(--success);">${currentLanguage === 'no' ? 'Ollama kjører!' : 'Ollama is running!'}</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">${systemInfo.ollama_models.length} ${currentLanguage === 'no' ? 'modeller' : 'models'}: ${systemInfo.ollama_models.slice(0, 3).join(', ')}${systemInfo.ollama_models.length > 3 ? '...' : ''}</p>
+            `;
+            autoSection.style.display = 'none';
+            
+            // Check if we have models
+            if (systemInfo.ollama_models.length === 0) {
+                statusEl.innerHTML += `
+                    <p style="color: var(--warning); margin-top: 10px;">⚠️ ${currentLanguage === 'no' ? 'Ingen modeller funnet. Klikk nedenfor for å laste ned.' : 'No models found. Click below to download.'}</p>
+                `;
+                // Show pull button
+                autoSection.style.display = 'block';
+                document.getElementById('autoInstallBtn').textContent = '⬇️ Download llama2 Model';
+                document.getElementById('autoInstallBtn').onclick = () => pullModelOnly('llama2');
+                document.getElementById('step1').style.display = 'none';
+                document.getElementById('step2').style.display = 'none';
+            } else {
+                await loadProviders();
+                setTimeout(() => {
+                    closeSetupModal();
+                    showToast(currentLanguage === 'no' ? 'Ollama er klar!' : 'Ollama is ready!', 'success');
+                }, 1000);
+            }
+        } else if (systemInfo.can_auto_install) {
+            // Linux system - can auto-install
+            statusEl.innerHTML = `
+                <div class="status-icon">🐧</div>
+                <p>${currentLanguage === 'no' ? 'Linux oppdaget - automatisk installasjon tilgjengelig!' : 'Linux detected - automatic installation available!'}</p>
+            `;
+            autoSection.style.display = 'block';
+            manualSection.style.display = 'none';
+            
+            // Update steps based on current state
+            if (systemInfo.ollama_installed) {
+                updateStep('step1', 'done', 'Ollama installed');
+            }
+        } else if (systemInfo.in_docker) {
+            // Running in Docker
+            statusEl.innerHTML = `
+                <div class="status-icon">🐳</div>
+                <p>${currentLanguage === 'no' ? 'Kjører i Docker' : 'Running in Docker'}</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">${currentLanguage === 'no' ? 'Installer Ollama på vertsmaskinen' : 'Install Ollama on the host machine'}</p>
+            `;
+            autoSection.style.display = 'none';
+            manualSection.style.display = 'block';
+            switchSetupTab('docker');
+        } else {
+            // Windows/Mac or other - manual install
+            statusEl.innerHTML = `
+                <div class="status-icon">❌</div>
+                <p style="color: var(--danger);">${currentLanguage === 'no' ? 'Ollama ikke tilkoblet' : 'Ollama not connected'}</p>
+            `;
+            autoSection.style.display = 'none';
+            manualSection.style.display = 'block';
+            
+            // Auto-select tab based on system
+            if (systemInfo.is_windows) {
+                switchSetupTab('windows');
+            } else if (systemInfo.is_mac) {
+                switchSetupTab('linux');
+            }
+        }
+    } catch (e) {
+        console.error('System check error:', e);
+        statusEl.innerHTML = `
+            <div class="status-icon">❌</div>
+            <p style="color: var(--danger);">${currentLanguage === 'no' ? 'Kunne ikke sjekke system' : 'Could not check system'}</p>
+        `;
+    }
+}
+
+function updateStep(stepId, status, text) {
+    const step = document.getElementById(stepId);
+    if (!step) return;
+    
+    const iconEl = step.querySelector('.step-icon');
+    const textEl = step.querySelector('.step-text');
+    
+    if (status === 'done') {
+        iconEl.textContent = '✅';
+        step.classList.add('done');
+    } else if (status === 'running') {
+        iconEl.textContent = '🔄';
+        step.classList.add('running');
+    } else if (status === 'error') {
+        iconEl.textContent = '❌';
+        step.classList.add('error');
+    } else {
+        iconEl.textContent = '⏳';
+    }
+    
+    if (text) textEl.textContent = text;
+}
+
+async function autoInstallOllama() {
+    const btn = document.getElementById('autoInstallBtn');
+    const progress = document.getElementById('installProgress');
+    
+    btn.disabled = true;
+    btn.textContent = currentLanguage === 'no' ? '⏳ Installerer...' : '⏳ Installing...';
+    progress.style.display = 'block';
+    
+    try {
+        // Step 1: Install Ollama
+        updateStep('step1', 'running', currentLanguage === 'no' ? 'Installerer Ollama...' : 'Installing Ollama...');
+        document.getElementById('progressText').textContent = currentLanguage === 'no' ? 'Laster ned Ollama...' : 'Downloading Ollama...';
+        document.getElementById('progressFill').style.width = '10%';
+        
+        const installRes = await fetch('/ollama/install', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const installData = await installRes.json();
+        
+        if (!installRes.ok) {
+            throw new Error(installData.detail || 'Installation failed');
+        }
+        
+        updateStep('step1', 'done', 'Ollama installed!');
+        document.getElementById('progressFill').style.width = '33%';
+        
+        // Step 2: Start Ollama
+        updateStep('step2', 'running', currentLanguage === 'no' ? 'Starter Ollama...' : 'Starting Ollama...');
+        document.getElementById('progressText').textContent = currentLanguage === 'no' ? 'Starter tjenesten...' : 'Starting service...';
+        
+        const startRes = await fetch('/ollama/start', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!startRes.ok) {
+            const startData = await startRes.json();
+            throw new Error(startData.detail || 'Failed to start Ollama');
+        }
+        
+        updateStep('step2', 'done', 'Ollama started!');
+        document.getElementById('progressFill').style.width = '50%';
+        
+        // Wait a moment for Ollama to be ready
+        await new Promise(r => setTimeout(r, 2000));
+        
+        // Step 3: Pull model
+        await pullModelOnly('llama2');
+        
+    } catch (e) {
+        console.error('Auto-install error:', e);
+        showToast(e.message || 'Installation failed', 'error');
+        btn.disabled = false;
+        btn.textContent = '🔄 Retry Installation';
+        
+        // Show manual section as fallback
+        document.getElementById('manualInstallSection').style.display = 'block';
+    }
+}
+
+async function pullModelOnly(model) {
+    updateStep('step3', 'running', `${currentLanguage === 'no' ? 'Laster ned' : 'Downloading'} ${model}...`);
+    document.getElementById('progressText').textContent = `${currentLanguage === 'no' ? 'Laster ned modell' : 'Downloading model'} ${model}... (${currentLanguage === 'no' ? 'dette kan ta noen minutter' : 'this may take a few minutes'})`;
+    document.getElementById('progressFill').style.width = '60%';
+    
+    try {
+        const pullRes = await fetch(`/ollama/pull/${model}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!pullRes.ok) {
+            const pullData = await pullRes.json();
+            throw new Error(pullData.detail || 'Failed to pull model');
+        }
+        
+        updateStep('step3', 'done', `${model} downloaded!`);
+        document.getElementById('progressFill').style.width = '100%';
+        document.getElementById('progressText').textContent = currentLanguage === 'no' ? '✅ Ferdig! Alt er klart.' : '✅ Done! Everything is ready.';
+        
+        // Refresh providers and close
+        await loadProviders();
+        
+        showToast(currentLanguage === 'no' ? 'Ollama installert og klar!' : 'Ollama installed and ready!', 'success');
+        
+        setTimeout(() => {
+            closeSetupModal();
+        }, 2000);
+        
+    } catch (e) {
+        updateStep('step3', 'error', 'Download failed');
+        throw e;
+    }
+}
+
+function switchSetupTab(tab) {
+    // Update tab buttons
+    document.querySelectorAll('.setup-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    
+    // Show/hide content
+    document.getElementById('setupWindows').style.display = tab === 'windows' ? 'block' : 'none';
+    document.getElementById('setupLinux').style.display = tab === 'linux' ? 'block' : 'none';
+    document.getElementById('setupDocker').style.display = tab === 'docker' ? 'block' : 'none';
+}
+
+async function checkOllamaConnection() {
+    await checkSystemAndOllama();
+}
+
+function copyCode(code) {
+    navigator.clipboard.writeText(code).then(() => {
+        showToast(currentLanguage === 'no' ? 'Kopiert!' : 'Copied!', 'success', 1500);
+    }).catch(() => {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showToast(currentLanguage === 'no' ? 'Kopiert!' : 'Copied!', 'success', 1500);
+    });
+}
+
+// Check Ollama on provider change if selecting Ollama
+function onProviderChangeWithCheck() {
+    const providerSelect = document.getElementById('providerSelect');
+    const newProvider = providerSelect.value;
+    
+    // Check if Ollama is available when switching to it
+    const ollamaProvider = providers.find(p => p.id === 'ollama');
+    if (newProvider === 'ollama' && ollamaProvider && ollamaProvider.status !== 'available') {
+        showSetupModal();
+        return;
+    }
+    
+    currentProvider = newProvider;
+    localStorage.setItem('nora_provider', currentProvider);
+    updateModelDropdown();
+    
+    const provider = providers.find(p => p.id === currentProvider);
+    showToast(`Switched to ${provider?.name || currentProvider}`, 'success');
+}

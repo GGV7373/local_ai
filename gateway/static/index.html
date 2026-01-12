@@ -157,6 +157,117 @@
         </div>
     </div>
 
+    <!-- Ollama Setup Modal -->
+    <div class="modal-overlay" id="setupModal">
+        <div class="modal setup-modal">
+            <div class="modal-header">
+                <h3>⚙️ Ollama Setup</h3>
+                <button class="modal-close" onclick="closeSetupModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setup-status" id="setupStatus">
+                    <div class="status-icon">🔄</div>
+                    <p>Checking system...</p>
+                </div>
+                
+                <!-- Auto Install Section (shown on Linux) -->
+                <div id="autoInstallSection" style="display: none;">
+                    <div class="auto-install-box">
+                        <h4>🚀 Automatic Setup Available</h4>
+                        <p>We can install Ollama and download the AI model for you!</p>
+                        <div class="auto-install-steps" id="installSteps">
+                            <div class="install-step" id="step1">
+                                <span class="step-icon">⏳</span>
+                                <span class="step-text">Install Ollama</span>
+                            </div>
+                            <div class="install-step" id="step2">
+                                <span class="step-icon">⏳</span>
+                                <span class="step-text">Start Ollama Service</span>
+                            </div>
+                            <div class="install-step" id="step3">
+                                <span class="step-icon">⏳</span>
+                                <span class="step-text">Download llama2 Model</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" id="autoInstallBtn" onclick="autoInstallOllama()">
+                            ⚡ Install Everything Automatically
+                        </button>
+                        <div class="install-progress" id="installProgress" style="display: none;">
+                            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                            <p id="progressText">Installing...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Manual Install Section -->
+                <div id="manualInstallSection">
+                    <div class="setup-tabs">
+                        <button class="setup-tab active" data-tab="windows" onclick="switchSetupTab('windows')">🪟 Windows</button>
+                        <button class="setup-tab" data-tab="linux" onclick="switchSetupTab('linux')">🐧 Linux/Mac</button>
+                        <button class="setup-tab" data-tab="docker" onclick="switchSetupTab('docker')">🐳 Docker</button>
+                    </div>
+                    
+                    <div class="setup-content" id="setupWindows">
+                        <h4>Install Ollama on Windows</h4>
+                        <ol>
+                            <li>Download Ollama from <a href="https://ollama.com/download" target="_blank">ollama.com/download</a></li>
+                            <li>Run the installer</li>
+                            <li>Open PowerShell and run:</li>
+                        </ol>
+                        <div class="code-box">
+                            <code>ollama pull llama2</code>
+                            <button class="copy-btn" onclick="copyCode('ollama pull llama2')">📋</button>
+                        </div>
+                        <p class="note">Make sure Ollama is running (check system tray icon)</p>
+                    </div>
+                    
+                    <div class="setup-content" id="setupLinux" style="display: none;">
+                        <h4>Install Ollama on Linux/Mac</h4>
+                        <p>Run this command in your terminal:</p>
+                        <div class="code-box">
+                            <code>curl -fsSL https://ollama.com/install.sh | sh</code>
+                            <button class="copy-btn" onclick="copyCode('curl -fsSL https://ollama.com/install.sh | sh')">📋</button>
+                        </div>
+                        <p>Then pull the model:</p>
+                        <div class="code-box">
+                            <code>ollama pull llama2</code>
+                            <button class="copy-btn" onclick="copyCode('ollama pull llama2')">📋</button>
+                        </div>
+                        <p>Start Ollama:</p>
+                        <div class="code-box">
+                            <code>ollama serve</code>
+                            <button class="copy-btn" onclick="copyCode('ollama serve')">📋</button>
+                        </div>
+                    </div>
+                    
+                    <div class="setup-content" id="setupDocker" style="display: none;">
+                        <h4>Run Ollama with Docker</h4>
+                        <p>Start Ollama container:</p>
+                        <div class="code-box">
+                            <code>docker run -d -p 11434:11434 --name ollama ollama/ollama</code>
+                            <button class="copy-btn" onclick="copyCode('docker run -d -p 11434:11434 --name ollama ollama/ollama')">📋</button>
+                        </div>
+                        <p>Pull the model:</p>
+                        <div class="code-box">
+                            <code>docker exec ollama ollama pull llama2</code>
+                            <button class="copy-btn" onclick="copyCode('docker exec ollama ollama pull llama2')">📋</button>
+                        </div>
+                        <p class="note">Or use docker-compose:</p>
+                        <div class="code-box">
+                            <code>docker-compose --profile docker-ollama up -d</code>
+                            <button class="copy-btn" onclick="copyCode('docker-compose --profile docker-ollama up -d')">📋</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setup-actions">
+                    <button class="btn btn-primary" onclick="checkOllamaConnection()">🔄 Check Connection</button>
+                    <button class="btn btn-secondary" onclick="useGeminiInstead()">✨ Use Gemini Instead</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

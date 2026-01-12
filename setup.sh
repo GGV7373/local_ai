@@ -103,6 +103,71 @@ echo -e "${GREEN}✓${NC} Docker Compose available"
 USE_NATIVE_OLLAMA=false
 OLLAMA_URL=""
 
+install_ollama() {
+    echo -e "${BLUE}📥 Installing Ollama...${NC}"
+    echo ""
+    
+    # Download and install Ollama
+    if curl -fsSL https://ollama.com/install.sh | sh; then
+        echo -e "${GREEN}✓${NC} Ollama installed successfully!"
+        return 0
+    else
+        echo -e "${RED}❌ Failed to install Ollama${NC}"
+        return 1
+    fi
+}
+
+start_ollama() {
+    echo -e "${BLUE}🚀 Starting Ollama service...${NC}"
+    
+    # Check if systemd is available
+    if command -v systemctl &>/dev/null; then
+        sudo systemctl start ollama 2>/dev/null || true
+        sudo systemctl enable ollama 2>/dev/null || true
+        sleep 3
+        
+        if systemctl is-active --quiet ollama 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Ollama service started"
+            return 0
+        fi
+    fi
+    
+    # Fallback: start ollama serve in background
+    echo -e "${YELLOW}   Starting Ollama in background...${NC}"
+    nohup ollama serve > /tmp/ollama.log 2>&1 &
+    sleep 3
+    
+    # Verify it's running
+    if curl -s --connect-timeout 2 http://localhost:11434/api/tags &>/dev/null; then
+        echo -e "${GREEN}✓${NC} Ollama is now running"
+        return 0
+    else
+        echo -e "${RED}❌ Failed to start Ollama${NC}"
+        return 1
+    fi
+}
+
+pull_model() {
+    local model=$1
+    echo -e "${BLUE}📦 Downloading model: ${CYAN}$model${NC}..."
+    echo -e "${YELLOW}   This may take a few minutes depending on your internet speed.${NC}"
+    echo ""
+    
+    # Check if model already exists
+    if ollama list 2>/dev/null | grep -q "$model"; then
+        echo -e "${GREEN}✓${NC} Model $model is already installed!"
+        return 0
+    fi
+    
+    if ollama pull "$model"; then
+        echo -e "${GREEN}✓${NC} Model $model downloaded successfully!"
+        return 0
+    else
+        echo -e "${RED}❌ Failed to download model $model${NC}"
+        return 1
+    fi
+}
+
 check_native_ollama() {
     echo -e "${BLUE}🔍 Checking for Ollama...${NC}"
     
@@ -117,6 +182,8 @@ check_native_ollama() {
         if [ -n "$MODELS" ]; then
             echo -e "${CYAN}   Available models:${NC}"
             echo "$MODELS" | while read model; do echo "     - $model"; done
+        else
+            echo -e "${YELLOW}   No models found. We'll download one for you.${NC}"
         fi
         echo ""
         return 0
@@ -126,16 +193,46 @@ check_native_ollama() {
     if command -v ollama &>/dev/null; then
         echo -e "${YELLOW}⚠️  Ollama installed but not running.${NC}"
         echo ""
-        echo "   Options:"
-        echo "   1. Start native Ollama: ollama serve"
-        echo "   2. Use Docker Ollama (will run in container)"
+        read -p "Start Ollama now? (y/n) [y]: " START_OLLAMA
+        START_OLLAMA=${START_OLLAMA:-y}
+        
+        if [[ "$START_OLLAMA" =~ ^[Yy]$ ]]; then
+            if start_ollama; then
+                USE_NATIVE_OLLAMA=true
+                OLLAMA_URL="http://host.docker.internal:11434"
+                return 0
+            fi
+        fi
+        
         echo ""
-        read -p "Use Docker Ollama? (y/n) [y]: " USE_DOCKER_OLLAMA
+        read -p "Use Docker Ollama instead? (y/n) [y]: " USE_DOCKER_OLLAMA
         if [[ "$USE_DOCKER_OLLAMA" =~ ^[Nn]$ ]]; then
             echo -e "${YELLOW}Please start Ollama with 'ollama serve' and run setup again.${NC}"
             exit 0
         fi
         return 1
+    fi
+    
+    # Ollama not installed - offer to install it (Linux only)
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo -e "${CYAN}ℹ${NC}  Ollama not found on your system."
+        echo ""
+        echo -e "${GREEN}We can automatically install Ollama for you!${NC}"
+        echo ""
+        read -p "Install Ollama now? (y/n) [y]: " INSTALL_OLLAMA
+        INSTALL_OLLAMA=${INSTALL_OLLAMA:-y}
+        
+        if [[ "$INSTALL_OLLAMA" =~ ^[Yy]$ ]]; then
+            if install_ollama && start_ollama; then
+                USE_NATIVE_OLLAMA=true
+                OLLAMA_URL="http://host.docker.internal:11434"
+                echo ""
+                return 0
+            else
+                echo -e "${YELLOW}Falling back to Docker Ollama...${NC}"
+                return 1
+            fi
+        fi
     fi
     
     # Check if port 11434 is in use by something else
@@ -413,7 +510,7 @@ echo ""
 # =============================================================================
 # Pull AI Model with Retry
 # =============================================================================
-pull_model() {
+pull_ai_model() {
     local model=$1
     local max_retries=3
     local retry=0
@@ -424,6 +521,12 @@ pull_model() {
     
     # Use native ollama command if available, otherwise docker
     if [ "$USE_NATIVE_OLLAMA" = true ]; then
+        # Check if model already exists
+        if ollama list 2>/dev/null | grep -q "$model"; then
+            echo -e "${GREEN}✓${NC} Model '$model' is already downloaded!"
+            return 0
+        fi
+        
         if ollama pull $model; then
             echo -e "${GREEN}✓${NC} Model '$model' downloaded successfully!"
             return 0
@@ -466,7 +569,7 @@ pull_model() {
 
 # Only pull model if using Ollama
 if [ "$AI_PROVIDER" = "ollama" ]; then
-    pull_model $MODEL
+    pull_ai_model $MODEL
 else
     echo -e "${GREEN}✓${NC} Using Gemini API - no model download needed"
 fi

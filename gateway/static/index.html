@@ -102,7 +102,11 @@
                     <div class="messages" id="messages"></div>
                     <div class="chat-input-area">
                         <input type="text" class="chat-input" id="chatInput" placeholder="Type your message... / Skriv meldingen din..." autofocus>
+                        <button class="voice-btn" id="voiceBtn" onclick="toggleVoiceInput()" title="Click to speak (English or Norwegian)">🎤</button>
                         <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                    </div>
+                    <div id="voiceStatus" class="voice-status" style="display: none;">
+                        <span id="voiceIndicator" class="voice-indicator">🎙️ Listening...</span>
                     </div>
                 </div>
             </div>

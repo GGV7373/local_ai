@@ -13,6 +13,18 @@ let currentModel = localStorage.getItem('nora_model') || '';
 let currentLanguage = localStorage.getItem('nora_language') || 'en';
 let currentChatId = null;
 
+// Speech Recognition State
+let speechRecognition = null;
+let isListening = false;
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// Initialize Speech Recognition
+if (SpeechRecognitionAPI) {
+    speechRecognition = new SpeechRecognitionAPI();
+    speechRecognition.continuous = false;
+    speechRecognition.interimResults = true;
+}
+
 // =============================================================================
 // Toast Notifications
 // =============================================================================
@@ -73,6 +85,121 @@ function renderMarkdown(text) {
 }
 
 // =============================================================================
+// Speech Recognition & Text-to-Speech
+// =============================================================================
+function getLanguageCode() {
+    // Map display language to speech recognition language code
+    const languageMap = {
+        'en': 'en-US',
+        'no': 'nb-NO'  // Norwegian Bokmål
+    };
+    return languageMap[currentLanguage] || 'en-US';
+}
+
+function toggleVoiceInput() {
+    if (!SpeechRecognitionAPI) {
+        showToast('Speech recognition not supported in your browser', 'error');
+        return;
+    }
+
+    const voiceBtn = document.getElementById('voiceBtn');
+    const voiceStatus = document.getElementById('voiceStatus');
+    const chatInput = document.getElementById('chatInput');
+
+    if (isListening) {
+        // Stop listening
+        speechRecognition.abort();
+        isListening = false;
+        voiceBtn.classList.remove('active');
+        voiceStatus.style.display = 'none';
+    } else {
+        // Start listening
+        isListening = true;
+        voiceBtn.classList.add('active');
+        voiceStatus.style.display = 'flex';
+        chatInput.value = '';
+        chatInput.focus();
+
+        speechRecognition.lang = getLanguageCode();
+        speechRecognition.start();
+    }
+}
+
+function initializeSpeechRecognition() {
+    if (!speechRecognition) return;
+
+    speechRecognition.onstart = () => {
+        const voiceBtn = document.getElementById('voiceBtn');
+        const voiceStatus = document.getElementById('voiceStatus');
+        voiceBtn.classList.add('active');
+        voiceStatus.style.display = 'flex';
+    };
+
+    speechRecognition.onresult = (event) => {
+        const chatInput = document.getElementById('chatInput');
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+                chatInput.value += transcript + ' ';
+            } else {
+                interimTranscript += transcript;
+            }
+        }
+
+        // Show interim results
+        if (interimTranscript) {
+            chatInput.placeholder = '📍 ' + interimTranscript;
+        }
+    };
+
+    speechRecognition.onerror = (event) => {
+        const errorMessage = {
+            'no-speech': 'No speech detected. Please try again.',
+            'audio-capture': 'No microphone found. Check permissions.',
+            'network': 'Network error. Check your connection.',
+        }[event.error] || `Error: ${event.error}`;
+        
+        showToast(errorMessage, 'error');
+        stopVoiceInput();
+    };
+
+    speechRecognition.onend = () => {
+        stopVoiceInput();
+    };
+}
+
+function stopVoiceInput() {
+    const voiceBtn = document.getElementById('voiceBtn');
+    const voiceStatus = document.getElementById('voiceStatus');
+    const chatInput = document.getElementById('chatInput');
+
+    isListening = false;
+    voiceBtn.classList.remove('active');
+    voiceStatus.style.display = 'none';
+    chatInput.placeholder = 'Type your message... / Skriv meldingen din...';
+}
+
+function speakText(text) {
+    // Use Web Speech API for text-to-speech
+    if (!('speechSynthesis' in window)) {
+        console.log('Text-to-speech not supported');
+        return;
+    }
+
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = getLanguageCode();
+    utterance.rate = 0.95;
+    utterance.pitch = 1.0;
+
+    window.speechSynthesis.speak(utterance);
+}
+
+// =============================================================================
 // Initialization
 // =============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
@@ -80,6 +207,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!token) {
         showLogin();
     }
+    
+    // Initialize speech recognition
+    initializeSpeechRecognition();
     
     // Load config
     try {
@@ -257,6 +387,21 @@ function addMessage(text, type, isMarkdown = false) {
     
     // Store in history
     chatHistory.push({ role: type, content: text });
+    
+    // Speak AI response (extract plain text if markdown)
+    if (type === 'assistant') {
+        let textToSpeak = text;
+        // Remove markdown formatting for better speech
+        textToSpeak = textToSpeak.replace(/\*\*([^*]+)\*\*/g, '$1');
+        textToSpeak = textToSpeak.replace(/\*([^*]+)\*/g, '$1');
+        textToSpeak = textToSpeak.replace(/`([^`]+)`/g, '$1');
+        textToSpeak = textToSpeak.replace(/```[\s\S]*?```/g, '');
+        textToSpeak = textToSpeak.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+        textToSpeak = textToSpeak.substring(0, 300); // Limit to 300 chars for speech
+        
+        // Speak with a slight delay to avoid overlapping with user speech
+        setTimeout(() => speakText(textToSpeak), 500);
+    }
 }
 
 function clearChat() {

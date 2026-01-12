@@ -362,6 +362,67 @@ body {
     transform: scale(1.05);
 }
 
+.voice-btn {
+    width: 50px;
+    height: 50px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--accent);
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.voice-btn:hover {
+    background: rgba(0, 217, 255, 0.1);
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+
+.voice-btn.active {
+    background: rgba(255, 71, 87, 0.2);
+    border-color: var(--danger);
+    color: var(--danger);
+    animation: pulse 1.5s infinite;
+}
+
+.voice-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    margin-top: 10px;
+    background: rgba(46, 213, 115, 0.1);
+    border: 1px solid rgba(46, 213, 115, 0.3);
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.voice-indicator {
+    color: var(--success);
+    font-weight: 500;
+}
+
+.voice-indicator::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    margin-left: 6px;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 49%, 100% { opacity: 1; }
+    50%, 99% { opacity: 0.3; }
+}
+
 .send-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;

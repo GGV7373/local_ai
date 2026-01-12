@@ -24,12 +24,24 @@ if [[ "$OSTYPE" != "linux-gnu"* ]]; then
     exit 1
 fi
 
+# Check if we need sudo for docker
+SUDO=""
+if ! docker info &> /dev/null 2>&1; then
+    if sudo docker info &> /dev/null 2>&1; then
+        SUDO="sudo"
+        echo -e "${YELLOW}Using sudo for Docker commands${NC}"
+    else
+        echo -e "${RED}ERROR: Cannot connect to Docker. Start Docker first.${NC}"
+        exit 1
+    fi
+fi
+
 # Docker compose detection
 COMPOSE=""
-if docker compose version &> /dev/null 2>&1; then
-    COMPOSE="docker compose"
+if $SUDO docker compose version &> /dev/null 2>&1; then
+    COMPOSE="$SUDO docker compose"
 elif command -v docker-compose &> /dev/null; then
-    COMPOSE="docker-compose"
+    COMPOSE="$SUDO docker-compose"
 else
     echo -e "${RED}ERROR: Docker Compose not found${NC}"
     exit 1

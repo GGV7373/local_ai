@@ -165,6 +165,26 @@ sudo systemctl restart ollama
 ollama pull llama3.2
 ```
 
+##  Documentation
+
+Complete guides for all features and deployment:
+
+### Getting Started
+- [Quick Start Guide](docs/getting-started/QUICKSTART.md) - Get running in 3 steps
+- [Complete Features Guide](docs/FEATURES.md) - All features and capabilities
+
+### Features
+- [Voice Features](docs/features/VOICE.md) - Voice input/output setup and configuration
+- [Audio & Export](docs/features/AUDIO_EXPORT.md) - Audio transcription and chat export
+
+### Deployment
+- [Deployment Guide](docs/deployment/DEPLOYMENT.md) - Complete deployment with HTTPS
+
+### Troubleshooting
+- [Troubleshooting Guide](docs/troubleshooting/TROUBLESHOOTING.md) - Common issues and solutions
+
+---
+
 ##  License
 
 MIT License

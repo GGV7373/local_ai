@@ -1,5 +1,7 @@
 # Nora AI - Linux Private Server Edition
 
+![N.O.R.A](N.O.R.A.png)
+
 Self-hosted AI assistant for private networks. No cloud dependencies, direct IP access only.
 
 ##  Features
@@ -33,7 +35,7 @@ The setup will:
 ### Ollama (Local - Recommended)
 - Runs locally, no API keys needed
 - GPU acceleration for NVIDIA/AMD
-- Models: llama3.2, mistral, gemma2, codellama
+- Models: you can install any Ollama-compatible model (e.g. llama3.2, gemini-1.5-pro)
 
 ### Google Gemini (Cloud)
 - Requires API key from https://aistudio.google.com
@@ -47,12 +49,16 @@ The setup will:
  docker-compose.yml    # Container configuration
  .env                  # Your settings (auto-generated)
  company_info/         # Company files (AI reads these)
-    config.json       # Company/assistant name
-    system_prompt.txt # Custom AI personality
-    *.txt, *.md, ...  # Any documents
+  ├── config.json       # Company/assistant name
+  ├── system_prompt.txt # Custom AI personality
+  └── *.txt, *.md, ...  # Any documents
  uploads/              # User-uploaded files
  nginx/                # Optional SSL reverse proxy
  gateway/              # Web server
+  ├── static/           # Static files (HTML, CSS, JS)
+  ├── models.py         # AI model handling
+  ├── server.py         # Main server logic
+  └── ...               # Other server files
 ```
 
 ##  Supported File Types
@@ -187,4 +193,4 @@ Complete guides for all features and deployment:
 
 ##  License
 
-MIT License
+MIT License - See [LICENSE](LICENSE) for details.
